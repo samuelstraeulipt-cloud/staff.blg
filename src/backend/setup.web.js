@@ -1,7 +1,12 @@
 /* BLG TeamHub — one-time collection builder. Run once, then delete this file.
-   Running it twice is harmless: existing collections are reported and left alone. */
+   The Collections API refuses to run as an ordinary site visitor, so both calls
+   are elevated to run with the site owner's rights. */
 import { Permissions, webMethod } from 'wix-web-module';
 import { collections } from 'wix-data.v2';
+import { elevate } from 'wix-auth';
+
+const createCollection = elevate(collections.createDataCollection);
+const listAll = elevate(collections.listDataCollections);
 
 const T = (key, displayName) => ({ key, displayName, type: 'TEXT' });
 const N = (key, displayName) => ({ key, displayName, type: 'NUMBER' });
@@ -40,20 +45,13 @@ export const setupCollections = webMethod(Permissions.Anyone, async () => {
   const report = [];
   for (const def of SCHEMA) {
     try {
-      await collections.createDataCollection({ ...def, permissions: ADMIN_ONLY });
+      await createCollection({ ...def, permissions: ADMIN_ONLY });
       report.push(def._id + ': created');
     } catch (err) {
-      const msg = String((err && err.message) || err);
+      const msg = String((err && err.message) || err).slice(0, 140);
       if (/already exists|ALREADY_EXISTS|duplicate/i.test(msg)) {
         report.push(def._id + ': exists');
-        continue;
-      }
-      try {
-        await collections.createDataCollection({ ...def, permissions: {
-          read: 'SITE_MEMBER_AUTHOR', insert: 'SITE_MEMBER_AUTHOR',
-          update: 'SITE_MEMBER_AUTHOR', remove: 'SITE_MEMBER_AUTHOR' } });
-        report.push(def._id + ': created (fallback permissions)');
-      } catch (err2) {
+      } else {
         report.push(def._id + ': FAILED - ' + msg);
       }
     }
@@ -62,7 +60,7 @@ export const setupCollections = webMethod(Permissions.Anyone, async () => {
 });
 
 export const listCollections = webMethod(Permissions.Anyone, async () => {
-  const res = await collections.listDataCollections();
+  const res = await listAll();
   return (res.collections || [])
     .filter(c => c.collectionType === 'NATIVE')
     .map(c => c._id + ' [' + (c.fields || [])
