@@ -12,17 +12,32 @@
    Everything renders inside a shadow root, so the Wix theme cannot reach in and
    nothing here leaks out onto the rest of the page.
 
-   In:   setAttribute('data',  JSON.stringify(payloadFromGetMyMonth))
+   All seven screens live here and switch instantly, the way the mockup does.
+   The page code decides what to fetch; this file only says what it wants.
+
+   In:   setAttribute('data',  JSON.stringify({ view, me, ...payload }))
          setAttribute('state', 'loading' | 'ready' | 'error')
          setAttribute('message', 'text to show in the banner')
 
-   Out:  teamhub:month     { ym }
+         `view` is one of: month | open | admin | frontdesk | schedule | team.
+         If it is missing the payload is treated as a month, so the original
+         page code keeps working untouched.
+
+   Out:  teamhub:view      { view }                         a tab was clicked
+         teamhub:month     { ym }                           month arrows
+         teamhub:week      { monday }                       week arrows
          teamhub:absences  { picks: [{kind, refId, date}] }
          teamhub:undo      { sessionId }
          teamhub:hours     { shiftId, date, hours }
+         teamhub:request   { sessionId, kind }              want it / if needed
+         teamhub:withdraw  { sessionId }
+         teamhub:assign    { requestId }                    admin
+         teamhub:decline   { requestId }                    admin
+         teamhub:unassign  { sessionId }                    admin
+         teamhub:setshift  { shiftId, date, staffId }       admin, front desk
 
-   The contract is exactly the one the first slice used, so the page code and
-   the backend are untouched by this rewrite.
+   The payload each view expects is documented above its renderer below. The
+   backend is written to those shapes, so the two halves cannot drift.
    ========================================================================== */
 
 (function () {
@@ -102,21 +117,33 @@
     return r.join(' · ') || '—';
   }
 
-  /* The tabs, exactly as the mockup defines them. `built` marks the screens
-     that exist; the rest render dimmed so the bar does not change shape as
-     each one lands. */
+  /* The tabs, exactly as the mockup defines them — who sees what is decided
+     by role, and the backend re-checks the same rules before it answers. */
   var NAV = [
-    { key: 'admin',     label: 'Admin',         built: false, show: isAdmin },
+    { key: 'admin',     label: 'Admin',         built: true, show: isAdmin },
     { key: 'month',     label: 'My month',      built: true,
       show: function (me) { return isCoach(me) || isFD(me); } },
-    { key: 'open',      label: 'Open classes',  built: false,
+    { key: 'open',      label: 'Open classes',  built: true,
       show: function (me) { return isCoach(me) || isFD(me); } },
-    { key: 'schedule',  label: 'Schedule',      built: false,
+    { key: 'schedule',  label: 'Schedule',      built: true,
       show: function () { return true; } },
-    { key: 'team',      label: 'Team absences', built: false, show: isAdmin },
-    { key: 'frontdesk', label: 'Front desk',    built: false,
+    { key: 'team',      label: 'Team absences', built: true, show: isAdmin },
+    { key: 'frontdesk', label: 'Front desk',    built: true,
       show: function (me) { return isAdmin(me) || isFD(me); } }
   ];
+
+  /* How long ago a cover request came in — first come, first served needs it
+     visible, so an admin can see who put their hand up first. */
+  function ago(ms) {
+    if (!ms) return 'just now';
+    var mins = Math.round((Date.now() - Number(ms)) / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return mins + ' min ago';
+    var h = Math.floor(mins / 60);
+    if (h < 24) return h === 1 ? '1 hour ago' : h + ' hours ago';
+    var d = Math.floor(h / 24);
+    return d === 1 ? 'yesterday' : d + ' days ago';
+  }
 
   /* ----------------------------------------------------- the design system */
 
@@ -298,6 +325,62 @@
     '  text-transform:uppercase;color:var(--muted);margin-bottom:10px;display:block}',
     '.hint{font-size:12px;color:var(--muted);margin:14px 0 0;line-height:1.5}',
 
+    /* ----------------------------------------------------------- tables */
+    '.scroller{overflow-x:auto}',
+    '.tbl{width:100%;border-collapse:collapse;font-size:13.5px;min-width:620px}',
+    '.tbl th{text-align:left;font-family:var(--f-head);font-weight:600;font-size:10.5px;',
+    '  letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:11px 22px;',
+    '  border-bottom:1px solid var(--line-2);white-space:nowrap}',
+    '.tbl td{padding:10px 22px;border-bottom:1px solid var(--line-2);vertical-align:middle}',
+    '.tbl tr:last-child td{border-bottom:none}',
+    '.tbl tr.past td{background:#FCFCFD;color:var(--muted)}',
+    '.tbl tr.past td strong{color:var(--muted)}',
+    '.tbl select{height:34px;font-size:13px;max-width:170px;border:1px solid var(--line);',
+    '  border-radius:8px;background:#fff;padding:0 8px;font-family:var(--f-body);',
+    '  color:var(--text)}',
+    '.adj{display:inline-block;margin-left:7px;font-size:11px;font-weight:600;',
+    '  font-family:var(--f-head);border-radius:999px;padding:2px 7px;',
+    '  font-variant-numeric:tabular-nums}',
+    '.adj.up{background:var(--green-tint);color:#00794A}',
+    '.adj.down{background:var(--warn-tint);color:#8A5A00}',
+    '.stack{display:flex;flex-direction:column;gap:16px}',
+
+    /* --------------------------------------------------- request queue */
+    '.qblock{padding:13px 22px;border-bottom:1px solid var(--line-2)}',
+    '.qhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}',
+    '.qname{font-family:var(--f-head);font-weight:700;font-size:15px}',
+    '.qmeta{font-size:12.5px;color:var(--muted)}',
+    '.qrow{display:flex;align-items:center;gap:11px;padding:6px 0;flex-wrap:wrap}',
+    '.qwho{flex:1;min-width:150px;font-size:13.5px;font-weight:600}',
+    '.reqtime{font-weight:400;font-size:11.5px;color:var(--muted-2);white-space:nowrap;',
+    '  margin-left:6px}',
+
+    /* ------------------------------------------------------ week grid */
+    '.wkwrap{min-width:940px}',
+    '.wk{display:grid;grid-template-columns:repeat(7,1fr)}',
+    '.wk-col{border-right:1px solid var(--line-2)}',
+    '.wk-col:last-child{border-right:none}',
+    '.wk-head{padding:11px 12px 9px;border-bottom:1px solid var(--line-2);background:#FCFCFD}',
+    '.wk-dow{font-family:var(--f-head);font-weight:600;font-size:10.5px;letter-spacing:.12em;',
+    '  text-transform:uppercase;color:var(--muted-2)}',
+    '.wk-date{font-family:var(--f-head);font-weight:700;font-size:16px;margin-top:2px}',
+    '.wk-body{padding:9px;min-height:160px}',
+    '.cls{border-radius:10px;padding:7px 9px;margin-bottom:6px;border:1px solid transparent}',
+    '.cls-t{font-family:var(--f-head);font-weight:700;font-size:10.5px}',
+    '.cls-n{font-size:11.5px;font-weight:600;margin-top:1px;line-height:1.3}',
+    '.cls-c{font-size:10.5px;margin-top:2px;opacity:.75}',
+    '.cls.open{background:#fff;border:1.5px dashed var(--danger)}',
+    '.cls.open .cls-c{color:var(--danger);font-weight:700;opacity:1}',
+    '.cls.covered{background:#fff;border:1.5px solid var(--green-600)}',
+    '.cls.covered .cls-c{color:#00794A;font-weight:700;opacity:1}',
+    /* one rule across the week, so every front desk shift sits on the same line */
+    '.fd-band{border-top:1px solid var(--muted-2);border-bottom:1px solid var(--line-2);',
+    '  background:#FBFCFD;padding:7px 12px;font-family:var(--f-head);font-weight:600;',
+    '  font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted-2)}',
+    '.wk-fd-body{min-height:0;padding:10px 9px}',
+    '.legend i{width:10px;height:10px;border-radius:3px;display:inline-block;',
+    '  margin-right:6px;vertical-align:-1px}',
+
     /* --------------------------------------------------------- skeleton */
     '.skel{padding:20px 22px}',
     '.skel i{display:block;height:15px;border-radius:7px;',
@@ -460,8 +543,10 @@
       if (ev.composedPath().some(function (n) { return n.tagName === 'INPUT'; })) return;
 
       var el = ev.target && ev.target.closest
-        ? ev.target.closest('[data-ym],[data-thismonth],[data-pick],[data-clear],' +
-            '[data-record],[data-undo],[data-msg],[data-closeshare],[data-copy],[data-go]')
+        ? ev.target.closest('[data-ym],[data-thismonth],[data-week],[data-thisweek],' +
+            '[data-pick],[data-clear],[data-record],[data-undo],[data-msg],' +
+            '[data-closeshare],[data-copy],[data-go],[data-req],[data-withdraw],' +
+            '[data-assign],[data-decline],[data-unassign]')
         : null;
       if (!el) return;
 
@@ -473,7 +558,18 @@
         this._emit('teamhub:month', { ym: String(d.today).slice(0, 7) });
         return;
       }
-      if (el.dataset.go) { /* other screens are not built yet */ return; }
+      if (el.dataset.week) { this._emit('teamhub:week', { monday: el.dataset.week }); return; }
+      if (el.dataset.thisweek) { this._emit('teamhub:week', { monday: '' }); return; }
+      if (el.dataset.go) { this._share = null; this._sel = {}; this._emit('teamhub:view', { view: el.dataset.go }); return; }
+
+      if (el.dataset.req) {
+        this._emit('teamhub:request', { sessionId: el.dataset.req, kind: el.dataset.kind });
+        return;
+      }
+      if (el.dataset.withdraw) { this._emit('teamhub:withdraw', { sessionId: el.dataset.withdraw }); return; }
+      if (el.dataset.assign)   { this._emit('teamhub:assign',   { requestId: el.dataset.assign }); return; }
+      if (el.dataset.decline)  { this._emit('teamhub:decline',  { requestId: el.dataset.decline }); return; }
+      if (el.dataset.unassign) { this._emit('teamhub:unassign', { sessionId: el.dataset.unassign }); return; }
 
       if (el.dataset.clear) { this._sel = {}; this._render(); return; }
 
@@ -524,6 +620,16 @@
 
     _onChange(ev) {
       var el = ev.target;
+
+      /* Front desk: an admin changing who is on a shift. */
+      if (el.dataset && el.dataset.fd) {
+        var bits2 = el.dataset.fd.split('|');
+        this._emit('teamhub:setshift', {
+          shiftId: bits2[0], date: bits2[1], staffId: el.value || null
+        });
+        return;
+      }
+
       if (!el.dataset || !el.dataset.ov) return;
       var v = Number(el.value);
       if (!isFinite(v) || v < 0 || v > 24) { this._render(); return; }
@@ -567,12 +673,35 @@
           '<i style="width:38%"></i><i style="width:92%"></i><i style="width:88%"></i>' +
           '<i style="width:94%"></i><i style="width:70%"></i></div></div></div>';
       } else {
-        body = this._month(d, message, state);
+        var view = d.view || 'month';       // no view = the original month payload
+        var render = {
+          month:     this._month,
+          open:      this._open,
+          admin:     this._admin,
+          frontdesk: this._frontdesk,
+          schedule:  this._schedule,
+          team:      this._team
+        }[view] || this._month;
+        body = render.call(this, d, message, state);
       }
 
-      var chrome = (d && d.me) ? topbar(d.me, 'month') : '';
+      var chrome = (d && d.me) ? topbar(d.me, (d.view || 'month')) : '';
       this.shadowRoot.innerHTML =
         '<style>' + CSS + '</style><div class="app">' + chrome + body + '</div>';
+    }
+
+    /* A banner above the page, shared by every view. */
+    _flash(message, state) {
+      if (!message) return '';
+      return '<div class="flash"><div class="flash-in' +
+        (state === 'error' ? ' err' : '') + '">' + esc(message) + '</div></div>';
+    }
+
+    _head(title, sub, actions) {
+      return '<div class="page-head"><div>' +
+        '<h1 class="page-title">' + esc(title) + '</h1>' +
+        (sub ? '<p class="page-sub">' + sub + '</p>' : '') +
+        '</div>' + (actions ? '<div class="actions">' + actions + '</div>' : '') + '</div>';
     }
 
     _month(d, message, state) {
@@ -749,6 +878,397 @@
         hoursCell +
         state +
         '</div>';
+    }
+
+    /* =================================================== open classes
+       { today, mine:[{sessionId, date, time, name, discipline, hours,
+                       ownerName, ownerColour, requests, myRequest}],
+         covered:[{date, time, name, coveredByName, ownerName}] }
+       `mine` is already filtered by the backend to what this person is
+       cleared to take — the browser is never trusted with that rule. */
+    _open(d, message, state) {
+      var mine = d.mine || [], covered = d.covered || [];
+      var out = [this._flash(message, state), '<div class="page">'];
+
+      out.push(this._head('Open classes',
+        'Sessions with nobody on them. Request one and an admin confirms it.'));
+
+      out.push('<div class="card" style="margin-bottom:16px">' +
+        '<div class="card-head"><h2 class="card-title">You can cover these</h2>' +
+        '<span class="pill ' + (mine.length ? 'pill-bad' : 'pill-ok') + '">' +
+        mine.length + ' open</span></div>');
+
+      if (mine.length) {
+        mine.forEach(function (s) {
+          var n = Number(s.requests || 0);
+          out.push('<div class="row">' +
+            '<div class="dotcol" style="background:' + esc(s.ownerColour || '#B9B9C6') + '"></div>' +
+            '<div class="row-main"><div class="row-t">' + esc(s.name) + '</div>' +
+            '<div class="row-s">' + esc(fmtShort(s.date)) + ' · ' + esc(s.time) +
+              ' · normally ' + esc(shortName(s.ownerName)) + ' · ' + hrs(s.hours) + ' h' +
+              (n ? ' · ' + n + (n === 1 ? ' request' : ' requests') : '') + '</div></div>' +
+            discPill(s.discipline) +
+            '<div class="row-actions">' + (s.myRequest
+              ? '<span class="pill pill-warn">' +
+                  (s.myRequest === 'want' ? 'Want it' : 'If needed') + '</span>' +
+                '<button class="btn btn-quiet btn-sm" data-withdraw="' + esc(s.sessionId) +
+                  '">Withdraw</button>'
+              : '<button class="btn btn-primary btn-sm" data-req="' + esc(s.sessionId) +
+                  '" data-kind="want">Want it</button>' +
+                '<button class="btn btn-quiet btn-sm" data-req="' + esc(s.sessionId) +
+                  '" data-kind="ifneeded">If needed</button>') +
+            '</div></div>');
+        });
+        out.push('<div class="note-line"><strong>Want it</strong> means you’d like the ' +
+          'session. <strong>If needed</strong> means you can step in if nobody else does — ' +
+          'an admin only falls back to those once the “want it” requests are used up.</div>');
+      } else {
+        out.push('<div class="empty">Nothing open that you’re cleared for right now.</div>');
+      }
+      out.push('</div>');
+
+      if (covered.length) {
+        out.push('<div class="card"><div class="card-head">' +
+          '<h2 class="card-title">Already covered</h2>' +
+          '<span class="pill pill-ok">' + covered.length + ' sorted</span></div>');
+        covered.forEach(function (s) {
+          out.push('<div class="row">' +
+            '<div class="dotcol" style="background:var(--green-600)"></div>' +
+            '<div class="row-main"><div class="row-t">' + esc(s.name) + '</div>' +
+            '<div class="row-s">' + esc(fmtShort(s.date)) + ' · ' + esc(s.time) + ' · ' +
+              esc(shortName(s.coveredByName)) + ' covering for ' +
+              esc(shortName(s.ownerName)) + '</div></div></div>');
+        });
+        out.push('</div>');
+      }
+
+      out.push('</div>');
+      return out.join('');
+    }
+
+    /* ========================================================== admin
+       { ym, today, counts:{toApprove, uncovered, covered, handed},
+         queue:[{sessionId, name, date, time, ownerName, status,
+                 requests:[{requestId, name, colour, kind, at, approved}]}],
+         noAsk:[{name, date, time, ownerName}],
+         covered:[{sessionId, name, date, time, coveredByName, ownerName}] } */
+    _admin(d, message, state) {
+      var ym = d.ym, c = d.counts || {};
+      var queue = d.queue || [], noAsk = d.noAsk || [], covered = d.covered || [];
+      var monthName = MONTHS[Number(ym.split('-')[1]) - 1];
+      var out = [this._flash(message, state), '<div class="page">'];
+
+      out.push(this._head('Admin',
+        'Absences record themselves — approving cover is the part that needs you'));
+
+      out.push('<div class="card" style="margin-bottom:16px">' +
+        monthBar(ym, 'Everything on this page is ' + monthName + ' ' + ym.split('-')[0] +
+          ' — switch month and the lists change with it.') + '</div>');
+
+      out.push('<div class="stats">' +
+        statTile(queue.length, 'To approve', queue.length ? 'var(--warn)' : null) +
+        statTile(c.uncovered != null ? c.uncovered : noAsk.length, 'Uncovered',
+          (c.uncovered || noAsk.length) ? 'var(--danger)' : null) +
+        statTile(covered.length, 'Covered', 'var(--green-600)') +
+        statTile(c.handed != null ? c.handed : '—', 'Handed over') +
+        '</div>');
+
+      out.push('<div class="card" style="margin-bottom:16px"><div class="card-head">' +
+        '<h2 class="card-title">Waiting for you — ' + esc(monthName) + '</h2>' +
+        '<span class="pill ' + (queue.length ? 'pill-warn' : 'pill-ok') + '">' + queue.length +
+        ' ' + (queue.length === 1 ? 'session' : 'sessions') + '</span></div>');
+
+      if (queue.length) {
+        queue.forEach(function (s) {
+          out.push('<div class="qblock"><div class="qhead">' +
+            '<span class="qname">' + esc(s.name) + '</span>' +
+            '<span class="qmeta">' + esc(fmtShort(s.date)) + ' · ' + esc(s.time) +
+              ' · normally ' + esc(shortName(s.ownerName)) + '</span></div>');
+          (s.requests || []).forEach(function (r) {
+            out.push('<div class="qrow">' +
+              avatar({ name: r.name, colour: r.colour }, 28) +
+              '<span class="qwho">' + esc(r.name) +
+                '<span class="reqtime">(' + esc(ago(r.at)) + ')</span></span>' +
+              '<span class="pill ' + (r.kind === 'want' ? 'pill-ok' : 'pill-neutral') + '">' +
+                (r.kind === 'want' ? 'Want it' : 'If needed') + '</span>' +
+              (r.approved
+                ? '<span class="pill pill-ok">Assigned ✓</span><div class="row-actions">' +
+                  '<button class="btn btn-quiet btn-sm" data-unassign="' + esc(s.sessionId) +
+                  '">Change cover</button></div>'
+                : '<div class="row-actions">' +
+                  '<button class="btn btn-quiet btn-sm" data-decline="' + esc(r.requestId) +
+                    '">Decline</button>' +
+                  '<button class="btn btn-primary btn-sm" data-assign="' + esc(r.requestId) +
+                    '">' + (s.status === 'covered' ? 'Give it to them' : 'Assign') + '</button>' +
+                  '</div>') +
+              '</div>');
+          });
+          if (s.status === 'covered') {
+            out.push('<div style="font-size:12px;color:var(--muted);padding-top:6px">' +
+              'Covered. Decline the others to clear this off your list.</div>');
+          }
+          out.push('</div>');
+        });
+      } else {
+        out.push('<div class="empty">Nothing to decide. Every request has been dealt with.</div>');
+      }
+      out.push('</div>');
+
+      if (noAsk.length) {
+        out.push('<div class="card" style="margin-bottom:16px"><div class="card-head">' +
+          '<h2 class="card-title">Nobody has asked yet — ' + esc(monthName) + '</h2>' +
+          '<span class="pill pill-bad">' + noAsk.length + '</span></div>');
+        noAsk.forEach(function (s) {
+          out.push('<div class="row">' +
+            '<div class="dotcol" style="background:var(--danger)"></div>' +
+            '<div class="row-main"><div class="row-t">' + esc(s.name) + '</div>' +
+            '<div class="row-s">' + esc(fmtShort(s.date)) + ' · ' + esc(s.time) +
+              ' · normally ' + esc(shortName(s.ownerName)) + '</div></div>' +
+            '<span class="pill pill-neutral">No requests</span></div>');
+        });
+        out.push('<div class="note-line">Worth a nudge in the group chat — whoever is away ' +
+          'can open the session and copy the message again.</div></div>');
+      }
+
+      if (covered.length) {
+        out.push('<div class="card"><div class="card-head">' +
+          '<h2 class="card-title">Covered — ' + esc(monthName) + '</h2>' +
+          '<span class="pill pill-ok">' + covered.length + '</span></div>');
+        covered.forEach(function (s) {
+          out.push('<div class="row">' +
+            '<div class="dotcol" style="background:var(--green-600)"></div>' +
+            '<div class="row-main"><div class="row-t">' + esc(s.name) + '</div>' +
+            '<div class="row-s">' + esc(fmtShort(s.date)) + ' · ' + esc(s.time) + ' · ' +
+              esc(shortName(s.coveredByName)) + ' covering for ' +
+              esc(shortName(s.ownerName)) + '</div></div>' +
+            '<button class="btn btn-quiet btn-sm" data-unassign="' + esc(s.sessionId) +
+              '">Change cover</button></div>');
+        });
+        out.push('<div class="note-line">Changing cover on a session that has already ' +
+          'happened moves the hours with it, so the monthly totals stay honest.</div></div>');
+      }
+
+      out.push('</div>');
+      return out.join('');
+    }
+
+    /* ===================================================== front desk
+       { ym, today, canEdit, monthHours,
+         staff:[{id, name}],
+         rows:[{shiftId, date, code, label, start, end, plannedHours, hours,
+                staffId, status:{tone,text}, past, canLogHours}],
+         totals:[{name, colour, n, hours, adj}],
+         pattern:[{code, label, start, end, hours}] } */
+    _frontdesk(d, message, state) {
+      var rows = d.rows || [], totals = d.totals || [], pattern = d.pattern || [];
+      var staff = d.staff || [], canEdit = !!d.canEdit;
+      var out = [this._flash(message, state), '<div class="page">'];
+
+      out.push(this._head('Front desk',
+        'Shift plan and hours — the Schichtarbeitskalender, live'));
+
+      out.push('<div class="grid-2"><div class="card">');
+      out.push(monthBar(d.ym,
+        '<span><i style="background:var(--danger-tint);border:1px solid var(--danger)"></i>' +
+        'Needs cover</span> <span><i style="background:var(--warn-tint);' +
+        'border:1px solid var(--warn)"></i>Unstaffed</span>'));
+
+      out.push('<div class="scroller"><table class="tbl"><thead><tr>' +
+        '<th>Date</th><th>Shift</th><th>Time</th><th>Who</th>' +
+        '<th style="text-align:right">Hours</th><th>Status</th></tr></thead><tbody>');
+
+      if (!rows.length) {
+        out.push('<tr><td colspan="6" style="color:var(--muted)">No shifts in this month ' +
+          'yet — the rota is empty.</td></tr>');
+      }
+      rows.forEach(function (r) {
+        var changed = Number(r.hours) !== Number(r.plannedHours);
+        var who = canEdit
+          ? '<select data-fd="' + esc(r.shiftId) + '|' + esc(r.date) + '">' +
+            '<option value=""' + (r.staffId ? '' : ' selected') + '>kein Frontdesk</option>' +
+            staff.map(function (p) {
+              return '<option value="' + esc(p.id) + '"' +
+                (String(r.staffId) === String(p.id) ? ' selected' : '') + '>' +
+                esc(p.name) + '</option>';
+            }).join('') + '</select>'
+          : (r.staffName ? esc(r.staffName)
+             : '<span style="color:var(--muted)">kein Frontdesk</span>');
+
+        var hoursCell = r.canLogHours
+          ? '<span class="hedit"><input type="number" step="0.25" min="0" max="24"' +
+            (changed ? ' class="on"' : '') +
+            ' data-ov="' + esc(r.shiftId) + '|' + esc(r.date) + '"' +
+            ' value="' + hrs(r.hours) + '" aria-label="Hours worked"> h' +
+            (changed ? '<em>plan ' + hrs(r.plannedHours) + '</em>' : '') + '</span>'
+          : '<span class="hcell">' + hrs(r.hours) + ' h</span>';
+
+        var tone = (r.status && r.status.tone) || 'neutral';
+        out.push('<tr' + (r.past ? ' class="past"' : '') + '>' +
+          '<td style="white-space:nowrap">' + esc(fmtShort(r.date)) + '</td>' +
+          '<td><strong>' + esc(r.code) + '</strong> ' +
+            '<span style="color:var(--muted);font-size:12px">' + esc(r.label) + '</span></td>' +
+          '<td style="white-space:nowrap;font-variant-numeric:tabular-nums">' +
+            esc(r.start) + '–' + esc(r.end) + '</td>' +
+          '<td>' + who + '</td>' +
+          '<td style="text-align:right">' + hoursCell + '</td>' +
+          '<td><span class="pill pill-' + esc(tone) + '">' +
+            esc((r.status && r.status.text) || '') + '</span></td></tr>');
+      });
+      out.push('</tbody></table></div>');
+      out.push('<div class="note-line">Shifts that have already happened are marked ' +
+        '<strong>Done</strong>. You can still type the real hours into any box — that is how ' +
+        'a shift that ran long or short gets logged. It saves straight away, turns green, and ' +
+        'shows the planned figure beside it.' +
+        (canEdit ? ' Changing the name updates the plan and the monthly hours too.' : '') +
+        '</div></div>');
+
+      out.push('<div class="stack"><div class="card"><div class="card-head">' +
+        '<h2 class="card-title">Hours this month</h2>' +
+        '<span class="pill pill-neutral">' + hrs(d.monthHours || 0) + ' h</span></div>');
+      if (totals.length) {
+        totals.forEach(function (t) {
+          out.push('<div class="row">' +
+            '<div class="dotcol" style="background:' + esc(t.colour || '#B9B9C6') + '"></div>' +
+            '<div class="row-main"><div class="row-t">' + esc(t.name) + '</div>' +
+            '<div class="row-s">' + t.n + ' ' + (t.n === 1 ? 'shift' : 'shifts') +
+              ' · planned ' + hrs(Number(t.hours) - Number(t.adj || 0)) + ' h' +
+              (Number(t.adj) ? '<span class="adj ' + (t.adj > 0 ? 'up' : 'down') + '">' +
+                (t.adj > 0 ? '+' : '−') + hrs(Math.abs(t.adj)) + '</span>' : '') +
+            '</div></div>' +
+            '<strong style="font-family:var(--f-head);font-variant-numeric:tabular-nums;' +
+              'white-space:nowrap">' + hrs(t.hours) + ' h</strong></div>');
+        });
+      } else {
+        out.push('<div class="empty">Nobody is on the desk this month yet.</div>');
+      }
+      out.push('<div class="note-line">Totals are what was actually worked: planned hours ' +
+        'plus any overrides typed above, and they follow cover swaps, so a shift someone ' +
+        'hands over counts for whoever picked it up.</div></div>');
+
+      if (pattern.length) {
+        out.push('<div class="card card-pad"><span class="label">The weekly pattern — ' +
+          'planned hours</span>');
+        pattern.forEach(function (s) {
+          out.push('<div style="display:flex;gap:10px;padding:5px 0;font-size:13px">' +
+            '<span style="font-family:var(--f-head);font-weight:700;min-width:52px">' +
+              esc(s.code) + '</span>' +
+            '<span style="flex:1">' + esc(s.label) + '</span>' +
+            '<span style="color:var(--muted);font-variant-numeric:tabular-nums">' +
+              esc(s.start) + '–' + esc(s.end) + '</span>' +
+            '<span style="font-weight:600;font-variant-numeric:tabular-nums">' +
+              hrs(s.hours) + ' h</span></div>');
+        });
+        out.push('</div>');
+      }
+      out.push('</div></div></div>');
+      return out.join('');
+    }
+
+    /* ======================================================= schedule
+       { monday, label, prevMonday, nextMonday,
+         days:[{date, dow, dayLabel, isToday,
+                classes:[{time, name, tone, who, colour}],
+                shifts:[{start, code, tone, who}]}] }
+       tone is 'assigned' | 'open' | 'covered' | 'empty'. */
+    _schedule(d, message, state) {
+      var days = d.days || [];
+      var out = [this._flash(message, state), '<div class="page">'];
+
+      out.push(this._head('Schedule',
+        esc(d.label || '') + ' · classes first, front desk underneath',
+        '<button class="btn btn-quiet btn-sm" data-week="' + esc(d.prevMonday || '') +
+          '">‹ Prev</button>' +
+        '<button class="btn btn-quiet btn-sm" data-thisweek="1">This week</button>' +
+        '<button class="btn btn-quiet btn-sm" data-week="' + esc(d.nextMonday || '') +
+          '">Next ›</button>'));
+
+      out.push('<div class="card"><div class="mbar"><div class="legend">' +
+        '<span><i style="background:#78ADD2"></i>Assigned</span>' +
+        '<span><i style="background:#fff;border:1.5px dashed var(--danger)"></i>Needs cover</span>' +
+        '<span><i style="background:#fff;border:1.5px solid var(--green-600)"></i>Covered</span>' +
+        '<span><i style="background:var(--warn-tint)"></i>kein Frontdesk</span>' +
+        '</div></div><div class="scroller"><div class="wkwrap">');
+
+      function chip(time, name, tone, who, colour) {
+        var cls = tone === 'open' ? 'cls open' : tone === 'covered' ? 'cls covered' : 'cls';
+        var style = '';
+        if (tone === 'assigned' && colour) {
+          style = ' style="background:' + esc(colour) + ';color:' + ink(colour) + '"';
+        } else if (tone === 'empty') {
+          style = ' style="background:var(--warn-tint);color:#8A5A00"';
+        }
+        return '<div class="' + cls + '"' + style + '>' +
+          '<div class="cls-t">' + esc(time) + '</div>' +
+          '<div class="cls-n">' + esc(name) + '</div>' +
+          '<div class="cls-c">' + esc(who) + '</div></div>';
+      }
+
+      out.push('<div class="wk">');
+      days.forEach(function (day) {
+        out.push('<div class="wk-col"><div class="wk-head"' +
+          (day.isToday ? ' style="background:#F0FDF7"' : '') + '>' +
+          '<div class="wk-dow">' + esc(day.dow) + '</div>' +
+          '<div class="wk-date">' + esc(day.dayLabel) + '</div></div>' +
+          '<div class="wk-body">' +
+          (day.classes || []).map(function (c) {
+            return chip(c.time, c.name, c.tone, c.who, c.colour);
+          }).join('') +
+          '</div></div>');
+      });
+      out.push('</div><div class="fd-band">Front desk</div><div class="wk">');
+      days.forEach(function (day) {
+        out.push('<div class="wk-col"><div class="wk-body wk-fd-body">' +
+          (day.shifts || []).map(function (s) {
+            return chip(s.start + ' · FD', s.code, s.tone, s.who, s.colour);
+          }).join('') +
+          '</div></div>');
+      });
+      out.push('</div></div></div></div></div>');
+      return out.join('');
+    }
+
+    /* ================================================== team absences
+       { ym, total, people:[{name, colour,
+           sessions:[{date, time, name, status, coveredByName}]}] } */
+    _team(d, message, state) {
+      var people = d.people || [];
+      var out = [this._flash(message, state), '<div class="page">'];
+
+      out.push(this._head('Team absences',
+        'Every session someone has handed over this month'));
+
+      out.push('<div class="card">' +
+        monthBar(d.ym, '<span class="pill pill-neutral">' + (d.total || 0) +
+          ' handed over</span>'));
+
+      if (people.length) {
+        people.forEach(function (p) {
+          out.push('<div class="qblock">' +
+            '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">' +
+            avatar({ name: p.name, colour: p.colour }, 28) +
+            '<strong style="font-family:var(--f-head);font-size:14.5px">' + esc(p.name) +
+              '</strong>' +
+            '<span class="pill pill-neutral">' + p.sessions.length + ' ' +
+              (p.sessions.length === 1 ? 'session' : 'sessions') + '</span></div>');
+          p.sessions.forEach(function (s) {
+            out.push('<div style="display:flex;gap:12px;padding:4px 0;font-size:13px;' +
+              'flex-wrap:wrap">' +
+              '<span style="color:var(--muted);min-width:96px">' + esc(fmtShort(s.date)) +
+                ' · ' + esc(s.time) + '</span>' +
+              '<span style="flex:1;min-width:160px">' + esc(s.name) + '</span>' +
+              (s.status === 'open'
+                ? '<span class="pill pill-bad">Needs cover</span>'
+                : '<span class="pill pill-ok">' + esc(shortName(s.coveredByName)) +
+                  ' covering</span>') +
+              '</div>');
+          });
+          out.push('</div>');
+        });
+      } else {
+        out.push('<div class="empty">Nobody has handed anything over this month.</div>');
+      }
+      out.push('</div></div>');
+      return out.join('');
     }
   }
 
