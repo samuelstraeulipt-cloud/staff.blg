@@ -42,6 +42,11 @@ Each assertion is a bug that shipped, or nearly did — they come from the
 - **Every role check** — a plain coach cannot read the front desk (it is
   payroll), a non-admin cannot reach the admin queue, team absences or
   `setShiftStaff`.
+- **Cancelling a handover** removes the session and its requests, puts the
+  session back on its owner's month as a normal tickable row, takes it off the
+  coverer's, and is refused for anyone who is not an admin. In the browser it
+  takes two clicks, names who loses the session, and arming a second row
+  disarms the first.
 - **A colour cannot smuggle CSS**, and a query that would silently return fewer
   rows than exist raises `TRUNCATED` instead — including when `totalCount` is
   missing from the result and only `hasNext()` can tell.

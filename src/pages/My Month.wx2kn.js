@@ -13,7 +13,7 @@ import {
   whoAmI,
   getMyMonth, recordAbsences, undoAbsence, logHours,
   getOpenBoard, requestCover, withdrawRequest,
-  getAdminQueue, assignCover, declineRequest, unassignCover,
+  getAdminQueue, assignCover, declineRequest, unassignCover, cancelHandover,
   getFrontDesk, setShiftStaff,
   getWeek, getTeamAbsences
 } from 'backend/teamhub.web';
@@ -87,6 +87,17 @@ $w.onReady(async function () {
     () => unassignCover(event.detail.sessionId),
     'Cover changed — the session is open for someone else.'));
 
+  /* The wording depends on what was actually undone, so the backend says. */
+  el.on('teamhub:cancel', (event) => act(
+    async () => {
+      const res = await cancelHandover(event.detail.sessionId);
+      return res && res.wasCovered
+        ? 'Handover cancelled — it is back with whoever normally has it, and off the ' +
+          'month of whoever was covering. Worth telling them.'
+        : 'Handover cancelled — it is back with whoever normally has it.';
+    },
+    null));
+
   el.on('teamhub:setshift', (event) => act(
     () => setShiftStaff(event.detail.shiftId, event.detail.date, event.detail.staffId),
     'Shift updated.'));
@@ -130,9 +141,11 @@ async function act(run, note) {
   busy = true;
   el.setAttribute('state', 'loading');
   try {
-    await run();
+    /* Most writes have one thing to say whatever happens. The few that depend
+       on what they found return the sentence themselves. */
+    const said = await run();
     busy = false;
-    await load(note);
+    await load(typeof said === 'string' ? said : note);
   } catch (err) {
     busy = false;
     say('error', explain(err));

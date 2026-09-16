@@ -118,6 +118,62 @@ ok('the box keeps 3.5', mAfter.value === '3.5', mAfter.value);
 ok('focus survives here too', mAfter.focused === true, mAfter);
 ok('the tile follows it (8.00 \u2192 7.50)', /7\.50/.test(mAfter.tile), mAfter.tile);
 
+console.log('\n— admin: cancelling a handover takes two clicks —');
+const ADMIN = {
+  view: 'admin', me: ME, ym: '2027-03', today: '2027-03-01',
+  queue: [], noAsk: [{ sessionId: 'n1', name: 'Group Strength', date: '2027-03-02',
+    time: '18:00', ownerName: 'Anna Meier', status: 'open' }],
+  covered: [{ sessionId: 'v1', name: 'Group Strength', date: '2027-03-09', time: '18:00',
+    ownerName: 'Anna Meier', coveredByName: 'Bea Lang', status: 'covered' }],
+  counts: { uncovered: 1, handed: 2 }
+};
+const cancels = [];
+await page.exposeFunction('noteCancel', e => cancels.push(e));
+await page.evaluate(() => document.querySelector('blg-teamhub-month')
+  .addEventListener('teamhub:cancel', e => window.noteCancel(e.detail)));
+await set(ADMIN, 'ready', '');
+await page.waitForTimeout(60);
+
+const sr = () => page.evaluate(() => {
+  const r = document.querySelector('blg-teamhub-month').shadowRoot;
+  return { ask: r.querySelectorAll('[data-askcancel]').length,
+           armed: r.querySelectorAll('[data-cancel]').length,
+           text: r.textContent };
+});
+let st = await sr();
+ok('both handovers offer a cancel', st.ask === 2, st.ask);
+ok('nothing is armed yet', st.armed === 0, st.armed);
+
+await page.evaluate(() => document.querySelector('blg-teamhub-month')
+  .shadowRoot.querySelector('[data-askcancel="v1"]').click());
+await page.waitForTimeout(60);
+st = await sr();
+ok('one click arms it, does not fire', cancels.length === 0 && st.armed === 1, { cancels, st: st.armed });
+ok('...and it names who loses the session', /take it off Bea L/.test(st.text));
+
+await page.evaluate(() => document.querySelector('blg-teamhub-month')
+  .shadowRoot.querySelector('[data-askcancel="n1"]').click());
+await page.waitForTimeout(60);
+st = await sr();
+ok('arming another disarms the first', st.armed === 1, st.armed);
+ok('...and that one has nobody to lose it', !/take it off/.test(st.text));
+
+await page.evaluate(() => document.querySelector('blg-teamhub-month')
+  .shadowRoot.querySelector('[data-nocancel]').click());
+await page.waitForTimeout(60);
+ok('"Keep it" backs out', (await sr()).armed === 0 && cancels.length === 0);
+
+await page.evaluate(() => {
+  const r = document.querySelector('blg-teamhub-month').shadowRoot;
+  r.querySelector('[data-askcancel="n1"]').click();
+});
+await page.waitForTimeout(60);
+await page.evaluate(() => document.querySelector('blg-teamhub-month')
+  .shadowRoot.querySelector('[data-cancel]').click());
+await page.waitForTimeout(80);
+ok('the second click fires it, once', cancels.length === 1 && cancels[0].sessionId === 'n1', cancels);
+ok('and the button disarms', (await sr()).armed === 0);
+
 console.log('\n— every screen still renders —');
 const SCREENS = {
   month: { view: 'month', me: ME, ym: '2027-03', today: '2027-03-01',

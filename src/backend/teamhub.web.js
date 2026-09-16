@@ -685,6 +685,33 @@ export const unassignCover = webMethod(Permissions.SiteMember, async (sessionId)
   return { ok: true };
 });
 
+/* The handover is off — whoever was away is doing it after all. Only an admin
+   can say so, because it is the one action that takes a session off somebody
+   else's month: a coverer who had been given it loses it here.
+
+   The owner's own `undoAbsence` refuses once cover is assigned, deliberately,
+   so that nobody strands a class by quietly backing out. This is the admin's
+   way to do the same thing on purpose. Without it the only route was to name a
+   different person on the front desk dropdown and then name the owner back —
+   two writes, and no route at all for a class. */
+export const cancelHandover = webMethod(Permissions.SiteMember, async (sessionId) => {
+  requireAdmin(await requireStaff());
+  if (typeof sessionId !== 'string') throw new Error('BAD_INPUT');
+  const s = await wixData.get('Sessions', sessionId, OPT);
+  if (!s) throw new Error('NOT_FOUND');
+
+  /* Requests first: a failure between the two leaves a session nobody has asked
+     about, which shows up as uncovered and can simply be cancelled again. The
+     other order would leave requests pointing at a session that is gone, which
+     no screen reads and nobody would ever see. */
+  const reqs = await wixData.query('CoverRequests')
+    .eq('sessionId', sessionId).limit(100).find(OPT);
+  await Promise.all(reqs.items.map(r => wixData.remove('CoverRequests', r._id, OPT)));
+  await wixData.remove('Sessions', sessionId, OPT);
+
+  return { ok: true, wasCovered: s.status === 'covered' };
+});
+
 /* ------------------------------------------------------------- front desk */
 export const getFrontDesk = webMethod(Permissions.SiteMember, async (ym) => {
   const staff = await requireStaff();

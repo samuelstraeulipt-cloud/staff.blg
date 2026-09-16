@@ -34,6 +34,7 @@
          teamhub:assign    { requestId }                    admin
          teamhub:decline   { requestId }                    admin
          teamhub:unassign  { sessionId }                    admin
+         teamhub:cancel    { sessionId }                    admin — the handover is off
          teamhub:setshift  { shiftId, date, staffId }       admin, front desk
 
    The payload each view expects is documented above its renderer below. The
@@ -492,6 +493,7 @@
       this._data = null;
       this._sel = {};            // key -> {kind, refId, date}
       this._share = null;        // array of items whose message is being shown
+      this._confirm = null;      // sessionId whose cancel is one click from real
       this._onClick = this._onClick.bind(this);
       this._onChange = this._onChange.bind(this);
     }
@@ -521,6 +523,7 @@
         try {
           this._data = JSON.parse(newV);
           this._sel = {};        // a fresh month starts unticked
+          this._confirm = null;  // and no half-pressed buttons
         } catch (e) {
           this._data = null;
         }
@@ -557,7 +560,8 @@
         ? ev.target.closest('[data-ym],[data-thismonth],[data-week],[data-thisweek],' +
             '[data-pick],[data-clear],[data-record],[data-undo],[data-msg],' +
             '[data-closeshare],[data-copy],[data-copytable],[data-go],[data-req],' +
-            '[data-withdraw],[data-assign],[data-decline],[data-unassign]')
+            '[data-withdraw],[data-assign],[data-decline],[data-unassign],' +
+            '[data-askcancel],[data-nocancel],[data-cancel]')
         : null;
       if (!el) return;
 
@@ -611,6 +615,20 @@
         return;
       }
       if (el.dataset.closeshare) { this._share = null; this._render(); return; }
+
+      /* Cancelling is two clicks: arm, then confirm. Arming another row disarms
+         the first, so only one button is ever live at a time. */
+      if (el.dataset.askcancel) { this._confirm = el.dataset.askcancel; this._render(); return; }
+      if (el.dataset.nocancel)  { this._confirm = null; this._render(); return; }
+      if (el.dataset.cancel) {
+        var sid = el.dataset.cancel;
+        this._confirm = null;
+        /* Disarm on screen straight away rather than leaving "Yes — take it
+           off…" sitting there for as long as the round trip takes. */
+        this._render();
+        this._emit('teamhub:cancel', { sessionId: sid });
+        return;
+      }
 
       if (el.dataset.copy) { this._copy(el, null); return; }
       if (el.dataset.copytable) { this._copy(el, this._accountingTable()); return; }
@@ -807,6 +825,20 @@
         '<h1 class="page-title">' + esc(title) + '</h1>' +
         (sub ? '<p class="page-sub">' + sub + '</p>' : '') +
         '</div>' + (actions ? '<div class="actions">' + actions + '</div>' : '') + '</div>';
+    }
+
+    /* "The handover is off, they are doing it after all." It is the one admin
+       action that takes a session off somebody else's month, so when a coverer
+       stands to lose it the button says whose it is and asks twice. */
+    _cancelBtn(sessionId, losing) {
+      if (this._confirm !== sessionId) {
+        return '<button class="btn btn-quiet btn-sm" data-askcancel="' + esc(sessionId) +
+          '">Cancel handover</button>';
+      }
+      return '<button class="btn btn-danger btn-sm" data-cancel="' + esc(sessionId) + '">' +
+          (losing ? 'Yes — take it off ' + esc(shortName(losing)) + '’s month' : 'Yes, cancel it') +
+        '</button>' +
+        '<button class="btn btn-quiet btn-sm" data-nocancel="1">Keep it</button>';
     }
 
     /* The four tiles at the top of My Month, on their own so an hours edit can
@@ -1068,7 +1100,13 @@
          noAsk:[{name, date, time, ownerName}],
          covered:[{sessionId, name, date, time, coveredByName, ownerName}] } */
     _admin(d, message, state) {
+      var self = this;
       var ym = d.ym, c = d.counts || {};
+      /* Who a cancel would take it from, when the queue row is already covered. */
+      var coveredName = function (s) {
+        var a = (s.requests || []).filter(function (r) { return r.approved; })[0];
+        return a ? a.name : null;
+      };
       var queue = d.queue || [], noAsk = d.noAsk || [], covered = d.covered || [];
       var monthName = MONTHS[Number(ym.split('-')[1]) - 1];
       var out = [this._flash(message, state), '<div class="page">'];
@@ -1122,6 +1160,11 @@
             out.push('<div style="font-size:12px;color:var(--muted);padding-top:6px">' +
               'Covered. Decline the others to clear this off your list.</div>');
           }
+          /* Plans change. If whoever is away can make it after all, this takes
+             the session off the board and throws the requests away with it. */
+          out.push('<div class="row-actions" style="padding-top:8px;justify-content:flex-end">' +
+            self._cancelBtn(s.sessionId, s.status === 'covered' ? coveredName(s) : null) +
+            '</div>');
           out.push('</div>');
         });
       } else {
@@ -1139,10 +1182,12 @@
             '<div class="row-main"><div class="row-t">' + esc(s.name) + '</div>' +
             '<div class="row-s">' + esc(fmtShort(s.date)) + ' · ' + esc(s.time) +
               ' · normally ' + esc(shortName(s.ownerName)) + '</div></div>' +
-            '<span class="pill pill-neutral">No requests</span></div>');
+            '<span class="pill pill-neutral">No requests</span>' +
+            '<div class="row-actions">' + self._cancelBtn(s.sessionId, null) + '</div></div>');
         });
         out.push('<div class="note-line">Worth a nudge in the group chat — whoever is away ' +
-          'can open the session and copy the message again.</div></div>');
+          'can open the session and copy the message again. If they can make it after all, ' +
+          '<strong>Cancel handover</strong> puts it back on their month.</div></div>');
       }
 
       if (covered.length) {
@@ -1156,11 +1201,16 @@
             '<div class="row-s">' + esc(fmtShort(s.date)) + ' · ' + esc(s.time) + ' · ' +
               esc(shortName(s.coveredByName)) + ' covering for ' +
               esc(shortName(s.ownerName)) + '</div></div>' +
-            '<button class="btn btn-quiet btn-sm" data-unassign="' + esc(s.sessionId) +
-              '">Change cover</button></div>');
+            '<div class="row-actions">' +
+              '<button class="btn btn-quiet btn-sm" data-unassign="' + esc(s.sessionId) +
+                '">Change cover</button>' +
+              self._cancelBtn(s.sessionId, s.coveredByName) +
+            '</div></div>');
         });
-        out.push('<div class="note-line">Changing cover on a session that has already ' +
-          'happened moves the hours with it, so the monthly totals stay honest.</div></div>');
+        out.push('<div class="note-line"><strong>Change cover</strong> puts the session back ' +
+          'on the board for somebody else. <strong>Cancel handover</strong> ends it — whoever ' +
+          'is normally on it is doing it after all. Either way the hours follow the person who ' +
+          'actually works it, so the monthly totals stay honest.</div></div>');
       }
 
       out.push('</div>');

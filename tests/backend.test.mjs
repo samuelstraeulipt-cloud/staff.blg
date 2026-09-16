@@ -125,6 +125,43 @@ await threw('assigning a declined request', () => T.assignCover(r2._id), 'DECLIN
 as('dan');
 await threw('a coach without the discipline', () => T.requestCover(s2._id, 'want'), 'NOT_CLEARED');
 
+console.log('\n— A3: an admin can cancel a handover in one step —');
+world(); as('anna');
+await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D1 }]);
+const cs = db.Sessions[0];
+as('bea'); await T.requestCover(cs._id, 'want');
+as('dan');
+await threw('a non-admin cancelling', () => T.cancelHandover(cs._id), 'NOT_ADMIN');
+as('cara');
+let out = await T.cancelHandover(cs._id);
+ok('it says nobody was covering', out.wasCovered === false, out);
+ok('the session is gone', db.Sessions.length === 0, db.Sessions.length);
+ok('and its requests with it', db.CoverRequests.length === 0, db.CoverRequests.length);
+as('anna');
+const back = (await T.getMyMonth(YM)).items.find(i => i.date === D1 && i.kind === 'class');
+ok('back on the owner\'s month, tickable again', back && back.state === 'planned' && back.selectable,
+  back && back.state);
+
+/* The case the front desk dropdown could not reach in one step. */
+world(); as('anna');
+await T.recordAbsences([{ kind: 'shift', refId: 's1', date: D1 }]);
+const ss = db.Sessions[0];
+as('bea'); await T.requestCover(ss._id, 'want');
+as('cara'); await T.assignCover(db.CoverRequests[0]._id);
+out = await T.cancelHandover(ss._id);
+ok('it reports that somebody was covering', out.wasCovered === true, out);
+as('bea');
+ok('it leaves the coverer\'s month', !(await T.getMyMonth(YM)).items
+  .find(i => i.date === D1 && i.kind === 'shift' && i.state === 'covering'));
+as('anna');
+const shiftBack = (await T.getMyMonth(YM)).items.find(i => i.date === D1 && i.kind === 'shift');
+ok('and is the owner\'s own shift again', shiftBack && shiftBack.state === 'planned',
+  shiftBack && shiftBack.state);
+as('cara');
+ok('the front desk shows it planned, not needing cover',
+  (await T.getFrontDesk(YM)).rows.find(r => r.date === D1).status.text === 'Planned');
+await threw('cancelling something already gone', () => T.cancelHandover(ss._id), 'NOT_FOUND');
+
 console.log('\n— M7: payroll is not public —');
 world(); as('dan');
 await threw('a plain coach reading front desk', () => T.getFrontDesk(YM), 'NOT_ALLOWED');
