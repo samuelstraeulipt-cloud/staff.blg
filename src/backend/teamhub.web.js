@@ -95,6 +95,18 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
   const assignAt = {};
   aRes.items.forEach(a => { assignAt[`${a.shiftId}|${a.date}`] = idOfEmail[mail(a.staffEmail)]; });
 
+  /* How many people have put a hand up for each session, so someone who has
+     handed a class over can see whether anyone has yet without leaving the
+     screen. Declined requests do not count — they are no longer on offer. */
+  const sessIds = seRes.items.map(s => s._id);
+  const reqRes = sessIds.length
+    ? await wixData.query('CoverRequests').hasSome('sessionId', sessIds).limit(600).find(OPT)
+    : { items: [] };
+  const reqCount = {};
+  reqRes.items.forEach(r => {
+    if (r.status !== 'declined') reqCount[r.sessionId] = (reqCount[r.sessionId] || 0) + 1;
+  });
+
   const items = [];
   const push = (row, sess) => {
     let state = 'planned', note = '';
@@ -107,7 +119,8 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
     }
     if (row.date < today && state === 'planned') state = 'done';
     items.push({ ...row, state, note,
-      sessionId: sess ? sess._id : null, selectable: state === 'planned' });
+      sessionId: sess ? sess._id : null, selectable: state === 'planned',
+      requests: sess ? (reqCount[sess._id] || 0) : 0 });
   };
 
   monthDates(ym).forEach(date => {

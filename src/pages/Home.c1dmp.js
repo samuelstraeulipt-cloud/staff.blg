@@ -1,15 +1,14 @@
-/* Temporary: runs the one-time collection builder and prints the result to the
-   developer console. Remove both this file's contents and backend/setup.web.js
-   once the collections exist. */
-import { setupCollections, listCollections } from 'backend/setup.web';
+/* =============================================================================
+   BLG TeamHub — Home page code
 
-$w.onReady(async function () {
-  try {
-    const created = await setupCollections();
-    console.log('SETUP_RESULT ' + JSON.stringify(created));
-    const listed = await listCollections();
-    console.log('SETUP_LIST ' + JSON.stringify(listed));
-  } catch (e) {
-    console.log('SETUP_ERROR ' + ((e && e.message) || e));
-  }
+   Deliberately empty. This page held a one-time collection builder while the
+   CMS was being set up; the collections exist now, so the builder and the
+   backend module behind it have both been removed. Leaving it in would have
+   re-run a privileged setup routine on every visit.
+
+   The staff tool lives on the My Month page.
+   ========================================================================== */
+
+$w.onReady(function () {
+  // nothing to do here
 });

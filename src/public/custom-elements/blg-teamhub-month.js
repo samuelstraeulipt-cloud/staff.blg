@@ -545,8 +545,8 @@
       var el = ev.target && ev.target.closest
         ? ev.target.closest('[data-ym],[data-thismonth],[data-week],[data-thisweek],' +
             '[data-pick],[data-clear],[data-record],[data-undo],[data-msg],' +
-            '[data-closeshare],[data-copy],[data-go],[data-req],[data-withdraw],' +
-            '[data-assign],[data-decline],[data-unassign]')
+            '[data-closeshare],[data-copy],[data-copytable],[data-go],[data-req],' +
+            '[data-withdraw],[data-assign],[data-decline],[data-unassign]')
         : null;
       if (!el) return;
 
@@ -601,7 +601,8 @@
       }
       if (el.dataset.closeshare) { this._share = null; this._render(); return; }
 
-      if (el.dataset.copy) { this._copy(el); return; }
+      if (el.dataset.copy) { this._copy(el, null); return; }
+      if (el.dataset.copytable) { this._copy(el, this._accountingTable()); return; }
 
       if (el.dataset.pick) {
         var k = el.dataset.pick;
@@ -638,10 +639,25 @@
       this._emit('teamhub:hours', { shiftId: bits[0], date: bits[1], hours: v });
     }
 
-    _copy(btn) {
-      var node = this.shadowRoot.getElementById('waText');
-      if (!node) return;
-      var text = node.textContent;
+    /* The payroll numbers as a tab-separated table, so it pastes straight into
+       a spreadsheet: planned, the adjustment, and what is actually owed. */
+    _accountingTable() {
+      var d = this._data || {};
+      var rows = ['Person\tShifts\tPlanned hours\tAdjustment\tHours worked'];
+      (d.totals || []).forEach(function (t) {
+        rows.push([t.name, t.n, hrs(Number(t.hours) - Number(t.adj || 0)),
+          Number(t.adj) ? hrs(t.adj) : '', hrs(t.hours)].join('\t'));
+      });
+      return rows.join('\n');
+    }
+
+    _copy(btn, override) {
+      var text = override;
+      if (text == null) {
+        var node = this.shadowRoot.getElementById('waText');
+        if (!node) return;
+        text = node.textContent;
+      }
       var label = btn.textContent;
       var done = function () {
         btn.textContent = 'Copied ✓';
@@ -792,7 +808,10 @@
           out.push('<div class="row">' +
             '<div class="dotcol" style="background:var(--danger)"></div>' +
             '<div class="row-main"><div class="row-t">' + esc(i.name) + '</div>' +
-            '<div class="row-s">' + esc(fmtShort(i.date)) + ' · ' + esc(i.time) + '</div></div>' +
+            '<div class="row-s">' + esc(fmtShort(i.date)) + ' · ' + esc(i.time) +
+              (i.requests == null ? '' : ' · ' + i.requests +
+                (Number(i.requests) === 1 ? ' request' : ' requests')) +
+            '</div></div>' +
             '<div class="row-actions">' +
               '<button class="btn btn-quiet btn-sm" data-msg="' + esc(key) + '">Message</button>' +
               (i.sessionId
@@ -1143,7 +1162,13 @@
       }
       out.push('<div class="note-line">Totals are what was actually worked: planned hours ' +
         'plus any overrides typed above, and they follow cover swaps, so a shift someone ' +
-        'hands over counts for whoever picked it up.</div></div>');
+        'hands over counts for whoever picked it up.</div>');
+      if (canEdit && totals.length) {
+        out.push('<div style="padding:0 22px 16px">' +
+          '<button class="btn btn-quiet btn-sm" data-copytable="1">Copy for accounting</button>' +
+          '</div>');
+      }
+      out.push('</div>');
 
       if (pattern.length) {
         out.push('<div class="card card-pad"><span class="label">The weekly pattern — ' +

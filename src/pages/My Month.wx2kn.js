@@ -10,6 +10,7 @@
    ========================================================================== */
 import { authentication, currentMember } from 'wix-members-frontend';
 import {
+  whoAmI,
   getMyMonth, recordAbsences, undoAbsence, logHours,
   getOpenBoard, requestCover, withdrawRequest,
   getAdminQueue, assignCover, declineRequest, unassignCover,
@@ -89,6 +90,14 @@ $w.onReady(async function () {
   el.on('teamhub:setshift', (event) => act(
     () => setShiftStaff(event.detail.shiftId, event.detail.date, event.detail.staffId),
     'Shift updated.'));
+
+  /* An admin's job starts at the approval queue, so that is where they land.
+     Everyone else opens on their own month. One cheap call decides it — and if
+     it fails, the month loader reports the reason properly. */
+  try {
+    const who = await whoAmI();
+    if (who && who.ok && (who.me.roles || []).includes('admin')) view = 'admin';
+  } catch (e) { /* fall through to the month, which will explain itself */ }
 
   load();
 });
