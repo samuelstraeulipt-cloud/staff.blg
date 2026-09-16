@@ -149,13 +149,21 @@ function say(state, message) {
 function explain(err) {
   const code = String((err && err.message) || '');
   if (code.includes('NOT_SIGNED_IN')) return 'You are signed out. Reload the page and sign in again.';
+  if (code.includes('EMAIL_UNVERIFIED')) return 'Please confirm your email address first — check your inbox for the link, then reload this page.';
+  if (code.includes('DUPLICATE_STAFF_EMAIL')) return 'Your email is on the BLG staff list twice, so we cannot tell which record is yours. Ask Chris or Sam to remove the duplicate.';
   if (code.includes('NO_STAFF_RECORD')) return 'Your account is not on the BLG staff list yet. Ask Chris or Sam to add your email to the team list, then reload this page.';
   if (code.includes('STAFF_INACTIVE')) return 'Your staff record is marked inactive. Speak to an admin.';
   if (code.includes('NOT_ADMIN')) return 'That screen is for admins only.';
+  if (code.includes('NOT_ALLOWED')) return 'That screen is for admins and front desk only.';
   if (code.includes('NOT_CLEARED')) return 'You are not cleared to take that kind of session.';
+  if (code.includes('IS_COVERING')) return 'They are already covering that session — use Change cover rather than declining them.';
+  if (code.includes('DECLINED')) return 'That request has already been turned down. Ask them to put their hand up again.';
   if (code.includes('ALREADY_COVERED')) return 'Someone has already been assigned to that session. Ask an admin to change the cover.';
   if (code.includes('NOT_YOURS')) return 'That session is not yours to change.';
   if (code.includes('BAD_HOURS')) return 'Hours have to be between 0 and 24.';
+  /* A visible error beats a screen that has quietly dropped rows: the numbers
+     on it would look perfectly reasonable and be wrong. */
+  if (code.includes('TRUNCATED')) return 'There is more here than this screen can load at once, so some rows are missing. Tell Sam before trusting the numbers.';
   return 'Something went wrong. Reload the page and try again.';
 }
 

@@ -7,12 +7,12 @@
    This file carries the design system from the mockup — tokens, the two
    typefaces, buttons, pills, cards, rows, tables — together with the black
    TeamHub top bar. Every screen added from here is written against the system
-   in this file, which is what stops seven screens drifting apart.
+   in this file, which is what stops the six screens drifting apart.
 
    Everything renders inside a shadow root, so the Wix theme cannot reach in and
    nothing here leaks out onto the rest of the page.
 
-   All seven screens live here and switch instantly, the way the mockup does.
+   All six screens live here and switch instantly, the way the mockup does.
    The page code decides what to fetch; this file only says what it wants.
 
    In:   setAttribute('data',  JSON.stringify({ view, me, ...payload }))
@@ -312,6 +312,9 @@
 
     /* ------------------------------------------------------------ flash */
     '.flash{max-width:1320px;margin:16px auto -6px;padding:0 20px}',
+    /* The slot is always in the markup so the banner can be swapped without
+       rebuilding the page under someone's fingers; empty, it takes no room. */
+    '.flash:empty{display:none;margin:0}',
     '.flash-in{border-radius:12px;padding:13px 16px;font-size:13.5px;font-weight:500;',
     '  background:var(--green-tint);color:#00623C}',
     '.flash-in.err{background:var(--danger-tint);color:#A3272B}',
@@ -506,6 +509,14 @@
     }
 
     attributeChangedCallback(name, oldV, newV) {
+      /* A new banner is not a reason to rebuild the page. It used to be, which
+         is why logging hours looked like it had failed: the confirmation
+         message triggered a full redraw from data that predated the edit, so
+         the box you had just typed into was destroyed and replaced with the
+         old number. */
+      if (name === 'message') {
+        if (this._patchFlash(newV || '', this.getAttribute('state'))) return;
+      }
       if (name === 'data' && newV) {
         try {
           this._data = JSON.parse(newV);
@@ -636,7 +647,67 @@
       if (!isFinite(v) || v < 0 || v > 24) { this._render(); return; }
       v = Math.round(v * 4) / 4;               // quarter hours, like the sheet
       var bits = el.dataset.ov.split('|');
+      this._applyHours(bits[0], bits[1], v);
+
+      /* Green means "this is not the planned figure". Toggled here because the
+         page deliberately does not redraw after an hours save. */
+      var planned = null;
+      (((this._data || {}).rows) || []).forEach(function (r) {
+        if (r.shiftId === bits[0] && r.date === bits[1]) planned = Number(r.plannedHours);
+      });
+      if (planned !== null) el.classList.toggle('on', v !== planned);
+
+      /* The month's totals move with it, so redraw that card and nothing else. */
+      var card = this.shadowRoot && this.shadowRoot.querySelector('[data-totalscard]');
+      if (card && this._data && Array.isArray(this._data.totals)) {
+        card.innerHTML = this._totalsBody(this._data);
+      }
+
       this._emit('teamhub:hours', { shiftId: bits[0], date: bits[1], hours: v });
+    }
+
+    /* Write the new figure into the local copy the moment it is sent. The page
+       deliberately does not reload after logging hours — people type several in
+       a row — so without this the screen keeps showing the number that was
+       just replaced, and the month total underneath it stays wrong. */
+    _applyHours(shiftId, date, v) {
+      var d = this._data;
+      if (!d) return;
+
+      (d.rows || []).forEach(function (r) {
+        if (r.shiftId === shiftId && r.date === date) r.hours = v;
+      });
+      (d.items || []).forEach(function (i) {
+        if (i.kind === 'shift' && i.refId === shiftId && i.date === date) i.hours = v;
+      });
+
+      /* My month keeps one running total; the front desk keeps one per person. */
+      if (d.items && d.totals && typeof d.totals.hours === 'number') {
+        var sum = 0;
+        d.items.forEach(function (i) {
+          if (i.state !== 'needsCover' && i.state !== 'covered') sum += Number(i.hours || 0);
+        });
+        d.totals.hours = Math.round(sum * 100) / 100;
+      }
+      if (d.rows && Array.isArray(d.totals)) {
+        var by = {};
+        d.rows.forEach(function (r) {
+          if (!r.actualId) return;
+          var t = by[r.actualId] || (by[r.actualId] = { n: 0, hours: 0, adj: 0 });
+          t.n += 1;
+          t.hours += Number(r.hours || 0);
+          t.adj += Number(r.hours || 0) - Number(r.plannedHours || 0);
+        });
+        d.totals.forEach(function (t) {
+          var v2 = by[t.id] || { n: 0, hours: 0, adj: 0 };
+          t.n = v2.n;
+          t.hours = Math.round(v2.hours * 100) / 100;
+          t.adj = Math.round(v2.adj * 100) / 100;
+        });
+        d.monthHours = Math.round(d.totals.reduce(function (n, t) {
+          return n + Number(t.hours || 0);
+        }, 0) * 100) / 100;
+      }
     }
 
     /* The payroll numbers as a tab-separated table, so it pastes straight into
@@ -706,11 +777,25 @@
         '<style>' + CSS + '</style><div class="app">' + chrome + body + '</div>';
     }
 
-    /* A banner above the page, shared by every view. */
+    /* A banner above the page, shared by every view. The slot is always
+       present, so saying something new never costs a redraw. */
     _flash(message, state) {
+      return '<div class="flash">' + this._flashInner(message, state) + '</div>';
+    }
+
+    _flashInner(message, state) {
       if (!message) return '';
-      return '<div class="flash"><div class="flash-in' +
-        (state === 'error' ? ' err' : '') + '">' + esc(message) + '</div></div>';
+      return '<div class="flash-in' + (state === 'error' ? ' err' : '') + '">' +
+        esc(message) + '</div>';
+    }
+
+    /* Swap just the banner. Returns false if there is no page to patch yet. */
+    _patchFlash(message, state) {
+      if (!this.shadowRoot) return false;
+      var slot = this.shadowRoot.querySelector('.flash');
+      if (!slot) return false;
+      slot.innerHTML = this._flashInner(message, state);
+      return true;
     }
 
     _head(title, sub, actions) {
@@ -734,10 +819,7 @@
         return (i.state === 'needsCover' || i.state === 'covered') ? n : n + Number(i.hours || 0);
       }, 0);
 
-      if (message) {
-        out.push('<div class="flash"><div class="flash-in' +
-          (state === 'error' ? ' err' : '') + '">' + esc(message) + '</div></div>');
-      }
+      out.push(this._flash(message, state));
 
       out.push('<div class="page">');
 
@@ -1141,9 +1223,36 @@
         (canEdit ? ' Changing the name updates the plan and the monthly hours too.' : '') +
         '</div></div>');
 
-      out.push('<div class="stack"><div class="card"><div class="card-head">' +
+      /* Tagged so the numbers can be redrawn on their own when somebody edits
+         an hours box, without rebuilding the table under their cursor. */
+      out.push('<div class="stack"><div class="card" data-totalscard="1">' +
+        this._totalsBody(d) + '</div>');
+
+      if (pattern.length) {
+        out.push('<div class="card card-pad"><span class="label">The weekly pattern — ' +
+          'planned hours</span>');
+        pattern.forEach(function (s) {
+          out.push('<div style="display:flex;gap:10px;padding:5px 0;font-size:13px">' +
+            '<span style="font-family:var(--f-head);font-weight:700;min-width:52px">' +
+              esc(s.code) + '</span>' +
+            '<span style="flex:1">' + esc(s.label) + '</span>' +
+            '<span style="color:var(--muted);font-variant-numeric:tabular-nums">' +
+              esc(s.start) + '–' + esc(s.end) + '</span>' +
+            '<span style="font-weight:600;font-variant-numeric:tabular-nums">' +
+              hrs(s.hours) + ' h</span></div>');
+        });
+        out.push('</div>');
+      }
+      out.push('</div></div>');
+      return out.join('');
+    }
+
+    /* The hours card on its own, so it can be swapped in place. */
+    _totalsBody(d) {
+      var totals = d.totals || [], canEdit = !!d.canEdit;
+      var out = ['<div class="card-head">' +
         '<h2 class="card-title">Hours this month</h2>' +
-        '<span class="pill pill-neutral">' + hrs(d.monthHours || 0) + ' h</span></div>');
+        '<span class="pill pill-neutral">' + hrs(d.monthHours || 0) + ' h</span></div>'];
       if (totals.length) {
         totals.forEach(function (t) {
           out.push('<div class="row">' +
@@ -1168,24 +1277,6 @@
           '<button class="btn btn-quiet btn-sm" data-copytable="1">Copy for accounting</button>' +
           '</div>');
       }
-      out.push('</div>');
-
-      if (pattern.length) {
-        out.push('<div class="card card-pad"><span class="label">The weekly pattern — ' +
-          'planned hours</span>');
-        pattern.forEach(function (s) {
-          out.push('<div style="display:flex;gap:10px;padding:5px 0;font-size:13px">' +
-            '<span style="font-family:var(--f-head);font-weight:700;min-width:52px">' +
-              esc(s.code) + '</span>' +
-            '<span style="flex:1">' + esc(s.label) + '</span>' +
-            '<span style="color:var(--muted);font-variant-numeric:tabular-nums">' +
-              esc(s.start) + '–' + esc(s.end) + '</span>' +
-            '<span style="font-weight:600;font-variant-numeric:tabular-nums">' +
-              hrs(s.hours) + ' h</span></div>');
-        });
-        out.push('</div>');
-      }
-      out.push('</div></div></div>');
       return out.join('');
     }
 

@@ -25,8 +25,23 @@ function weekdayOf(ds) {                      // 1 = Monday ... 7 = Sunday
   const w = new Date(Date.UTC(Y, M - 1, D)).getUTCDay();
   return w === 0 ? 7 : w;
 }
+/* "Now" is the one thing that needs a real timezone. Between midnight and
+   02:00 in Zurich, UTC is still yesterday — so yesterday's classes would look
+   selectable, the open board would still offer them, and the schedule would
+   highlight the wrong day. The formatter is proved against a known instant
+   once at load, because a Node build without timezone data silently returns
+   UTC instead of failing; if it does, we fall back rather than lie. */
+const ZURICH = (() => {
+  try {
+    const f = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Zurich',
+      year: 'numeric', month: '2-digit', day: '2-digit' });
+    if (f.format(new Date(Date.UTC(2026, 0, 1, 23, 30))) === '2026-01-02') return f;
+  } catch (e) { /* no ICU — UTC it is */ }
+  return null;
+})();
 function todayISO() {
   const n = new Date();
+  if (ZURICH) return ZURICH.format(n);
   return `${n.getUTCFullYear()}-${pad(n.getUTCMonth() + 1)}-${pad(n.getUTCDate())}`;
 }
 const isYm = v => typeof v === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(v);
@@ -37,12 +52,32 @@ const billed = mins => Math.max(1, Math.ceil((Number(mins) || 0) / 60));
 const list = s => String(s || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
 const mail = s => String(s || '').trim().toLowerCase();
 
+/* A colour reaches the browser as a style attribute. Escaping stops it
+   breaking out of the quotes; only a shape check stops it being CSS. */
+const safeColour = c =>
+  /^#[0-9a-f]{6}$/i.test(String(c || '').trim()) ? String(c).trim() : '#B9B9C6';
+
+/* wixData returns the first N rows and says nothing about the rest, so a month
+   that has quietly lost a class looks exactly like a month that never had one.
+   A payroll number that is wrong in silence is worse than a screen that errors. */
+async function findAll(query, cap) {
+  const res = await query.limit(cap).find(OPT);
+  if (typeof res.totalCount === 'number' && res.totalCount > res.items.length) {
+    throw new Error('TRUNCATED');
+  }
+  return res;
+}
+
 /* ------------------------------------------------------------------ identity */
 /* First sign-in binds the Wix member to the Staff row with the matching email,
    so you never copy member ids by hand: type an email, they sign in once. */
 async function requireStaff() {
   let member;
-  try { member = await currentMember.getMember(); } catch (e) { throw new Error('NOT_SIGNED_IN'); }
+  /* FULL, not the default PUBLIC: loginEmail lives in FULL, and asking for the
+     wrong fieldset is why a member plainly on the staff list was told they
+     were not on it. */
+  try { member = await currentMember.getMember({ fieldsets: ['FULL'] }); }
+  catch (e) { throw new Error('NOT_SIGNED_IN'); }
   if (!member || !member._id) throw new Error('NOT_SIGNED_IN');
 
   const byId = await wixData.query('Staff').eq('memberId', member._id).limit(1).find(OPT);
@@ -54,9 +89,21 @@ async function requireStaff() {
   const email = mail(member.loginEmail);
   if (!email) throw new Error('NO_STAFF_RECORD');
 
+  /* Binding is what hands over that row's roles, so it has to be an address the
+     member proved they own — otherwise signing up as an admin's email before
+     the admin does inherits their access. An unknown value is not a failed
+     check: only a definite false is refused. */
+  if (member.loginEmailVerified === false) throw new Error('EMAIL_UNVERIFIED');
+
   const all = await wixData.query('Staff').limit(500).find(OPT);
-  const staff = all.items.find(s => mail(s.email) === email);
-  if (!staff) throw new Error('NO_STAFF_RECORD');
+  const hits = all.items.filter(s => mail(s.email) === email);
+  if (!hits.length) throw new Error('NO_STAFF_RECORD');
+  /* Two rows sharing an email is corruption, and the failure is invisible:
+     this binds to one id while every screen resolves the email to the other,
+     so the person signs in, is greeted by name and sees an empty month. */
+  if (hits.length > 1) throw new Error('DUPLICATE_STAFF_EMAIL');
+
+  const staff = hits[0];
   if (staff.active === false) throw new Error('STAFF_INACTIVE');
 
   staff.memberId = member._id;
@@ -67,7 +114,7 @@ async function requireStaff() {
 const isAdmin = s => list(s.roles).includes('admin');
 const pub = s => ({
   id: s._id, name: s.title || '', first: (s.title || '').split(' ')[0],
-  roles: list(s.roles), disciplines: list(s.disciplines), colour: s.colour || '#B9B9C6'
+  roles: list(s.roles), disciplines: list(s.disciplines), colour: safeColour(s.colour)
 });
 
 /* ------------------------------------------------------------------ month */
@@ -76,14 +123,19 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
   if (!isYm(ym)) ym = todayISO().slice(0, 7);
   const today = todayISO();
 
+  /* `active` is filtered in memory rather than with .ne(): whether a query
+     filter matches a row that has no value for the field at all is wixData
+     behaviour we would rather not bet the whole timetable on. */
   const [cRes, sRes, aRes, seRes, oRes, stRes] = await Promise.all([
-    wixData.query('Classes').ne('active', false).limit(300).find(OPT),
-    wixData.query('Shifts').ne('active', false).limit(100).find(OPT),
-    wixData.query('ShiftAssignments').startsWith('date', ym).limit(600).find(OPT),
-    wixData.query('Sessions').startsWith('date', ym).limit(600).find(OPT),
-    wixData.query('ShiftOverrides').startsWith('date', ym).limit(600).find(OPT),
-    wixData.query('Staff').limit(500).find(OPT)
+    findAll(wixData.query('Classes'), 300),
+    findAll(wixData.query('Shifts'), 100),
+    findAll(wixData.query('ShiftAssignments').startsWith('date', ym), 600),
+    findAll(wixData.query('Sessions').startsWith('date', ym).ascending('date'), 600),
+    findAll(wixData.query('ShiftOverrides').startsWith('date', ym), 600),
+    findAll(wixData.query('Staff'), 500)
   ]);
+  const classes = cRes.items.filter(c => c.active !== false);
+  const shifts  = sRes.items.filter(s => s.active !== false);
 
   const nameOf = {}, idOfEmail = {};
   stRes.items.forEach(p => { nameOf[p._id] = p.title; idOfEmail[mail(p.email)] = p._id; });
@@ -100,7 +152,7 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
      screen. Declined requests do not count — they are no longer on offer. */
   const sessIds = seRes.items.map(s => s._id);
   const reqRes = sessIds.length
-    ? await wixData.query('CoverRequests').hasSome('sessionId', sessIds).limit(600).find(OPT)
+    ? await findAll(wixData.query('CoverRequests').hasSome('sessionId', sessIds), 600)
     : { items: [] };
   const reqCount = {};
   reqRes.items.forEach(r => {
@@ -126,24 +178,29 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
   monthDates(ym).forEach(date => {
     const wd = weekdayOf(date);
 
-    cRes.items.filter(c => Number(c.weekday) === wd).forEach(c => {
+    /* A session you handed over stays on your month once somebody covers it.
+       Dropping it — which is what excluding a covered owner did — meant a class
+       you were waiting on simply vanished the moment it was sorted out, with no
+       way to see who took it, and the `covered` state below was never reached.
+       The session's own ownerId is checked as well as the plan's, so a handover
+       survives the class being reassigned to a different coach afterwards. */
+    classes.filter(c => Number(c.weekday) === wd).forEach(c => {
       const sess = sessionAt[`class:${c._id}:${date}`];
       const owner = idOfEmail[mail(c.coachEmail)];
-      const mine = (owner === staff._id && !(sess && sess.coveredById && sess.coveredById !== staff._id))
-                || (sess && sess.coveredById === staff._id);
+      const mine = (owner && owner === staff._id)
+                || (sess && (sess.ownerId === staff._id || sess.coveredById === staff._id));
       if (!mine) return;
       push({ kind: 'class', refId: c._id, date, time: c.start || '', name: c.title || '',
              discipline: c.discipline || '', hours: billed(c.minutes),
              plannedHours: billed(c.minutes), editableHours: false }, sess);
     });
 
-    sRes.items.filter(s => Number(s.weekday) === wd).forEach(s => {
+    shifts.filter(s => Number(s.weekday) === wd).forEach(s => {
       const key = `${s._id}|${date}`;
       const owner = assignAt[key];
-      if (!owner) return;                                  // kein Frontdesk
       const sess = sessionAt[`shift:${s._id}:${date}`];
-      const mine = (owner === staff._id && !(sess && sess.coveredById && sess.coveredById !== staff._id))
-                || (sess && sess.coveredById === staff._id);
+      const mine = (owner && owner === staff._id)
+                || (sess && (sess.ownerId === staff._id || sess.coveredById === staff._id));
       if (!mine) return;
       const planned = Number(s.hours) || 0;
       const worked = overrideAt[key] === undefined ? planned : Number(overrideAt[key]);
@@ -173,22 +230,55 @@ export const recordAbsences = webMethod(Permissions.SiteMember, async (picks) =>
   if (!Array.isArray(picks) || !picks.length) return { created: 0 };
   if (picks.length > 60) throw new Error('TOO_MANY');
   const today = todayISO();
-  let created = 0;
 
+  /* Shape first, so nothing below has to re-check it. */
+  const want = [], seen = {};
   for (const p of picks) {
     if (!p || (p.kind !== 'class' && p.kind !== 'shift')) continue;
     if (!isDate(p.date) || typeof p.refId !== 'string' || p.date < today) continue;
-    if (!(await owns(staff, p.kind, p.refId, p.date))) continue;
-
     const title = `${p.kind}:${p.refId}:${p.date}`;
-    const dupe = await wixData.query('Sessions').eq('title', title).limit(1).find(OPT);
-    if (dupe.items.length) continue;
-
-    await wixData.insert('Sessions', { title, kind: p.kind, refId: p.refId, date: p.date,
-      ownerId: staff._id, status: 'open', coveredById: null }, OPT);
-    created++;
+    if (seen[title]) continue;                       // the same slot sent twice
+    seen[title] = true;
+    want.push({ kind: p.kind, refId: p.refId, date: p.date, title });
   }
-  return { created };
+  if (!want.length) return { created: 0 };
+
+  /* Three reads for the whole batch. Validating pick by pick meant four to six
+     round trips each — a month's worth of holiday was several hundred, which is
+     both slow and long enough to be cut off partway through, leaving some
+     sessions handed over and the person told only that something went wrong. */
+  const dates = Object.keys(want.reduce((a, w) => { a[w.date] = 1; return a; }, {}));
+  const [plan, aRes, dupRes] = await Promise.all([
+    loadPlan(),
+    findAll(wixData.query('ShiftAssignments').hasSome('date', dates), 600),
+    findAll(wixData.query('Sessions').hasSome('title', want.map(w => w.title)), 100)
+  ]);
+
+  const classOf = {}; plan.classes.forEach(c => { classOf[c._id] = c; });
+  const shiftOf = {}; plan.shifts.forEach(s => { shiftOf[s._id] = s; });
+  const assignAt = {}; aRes.items.forEach(a => {
+    assignAt[`${a.shiftId}|${a.date}`] = plan.idOfEmail[mail(a.staffEmail)] || null;
+  });
+  const already = {}; dupRes.items.forEach(s => { already[s.title] = true; });
+
+  /* Ownership is still decided here against the plan, never against the
+     payload — the only change is that the plan is already in memory. */
+  const rows = [];
+  want.forEach(w => {
+    if (already[w.title]) return;
+    const row = w.kind === 'class' ? classOf[w.refId] : shiftOf[w.refId];
+    if (!row || Number(row.weekday) !== weekdayOf(w.date)) return;
+    const owner = w.kind === 'class'
+      ? plan.idOfEmail[mail(row.coachEmail)]
+      : assignAt[`${w.refId}|${w.date}`];
+    if (!owner || owner !== staff._id) return;
+    rows.push({ title: w.title, kind: w.kind, refId: w.refId, date: w.date,
+      ownerId: staff._id, status: 'open', coveredById: null });
+  });
+  if (!rows.length) return { created: 0 };
+
+  const res = await wixData.bulkInsert('Sessions', rows, OPT);
+  return { created: res && typeof res.inserted === 'number' ? res.inserted : rows.length };
 });
 
 /* Undoing is refused once cover is assigned — doing it silently would strand
@@ -245,19 +335,7 @@ async function emailToId(email) {
   return hit ? hit._id : null;
 }
 
-/** Is this slot theirs to hand over? Checked against the plan, not the client. */
-async function owns(staff, kind, id, date) {
-  const wd = weekdayOf(date);
-  if (kind === 'class') {
-    const c = await wixData.get('Classes', id, OPT);
-    if (!c || c.active === false || Number(c.weekday) !== wd) return false;
-    return (await emailToId(c.coachEmail)) === staff._id;
-  }
-  const s = await wixData.get('Shifts', id, OPT);
-  if (!s || s.active === false || Number(s.weekday) !== wd) return false;
-  return worksShift(staff, id, date);
-}
-
+/** Is this shift theirs to log hours against? The plan decides, not the client. */
 async function worksShift(staff, shiftId, date) {
   const sess = await wixData.query('Sessions')
     .eq('title', `shift:${shiftId}:${date}`).limit(1).find(OPT);
@@ -289,9 +367,9 @@ export const whoAmI = webMethod(Permissions.SiteMember, async () => {
    trip rather than five. */
 async function loadPlan(ym) {
   const [cRes, shRes, stRes] = await Promise.all([
-    wixData.query('Classes').ne('active', false).limit(300).find(OPT),
-    wixData.query('Shifts').ne('active', false).limit(100).find(OPT),
-    wixData.query('Staff').limit(500).find(OPT)
+    findAll(wixData.query('Classes'), 300),
+    findAll(wixData.query('Shifts'), 100),
+    findAll(wixData.query('Staff'), 500)
   ]);
   const byId = {}, idOfEmail = {}, emailOfId = {};
   stRes.items.forEach(p => {
@@ -299,12 +377,13 @@ async function loadPlan(ym) {
     idOfEmail[mail(p.email)] = p._id;
     emailOfId[p._id] = mail(p.email);
   });
-  return { classes: cRes.items, shifts: shRes.items, staff: stRes.items,
-           byId, idOfEmail, emailOfId };
+  return { classes: cRes.items.filter(c => c.active !== false),
+           shifts: shRes.items.filter(s => s.active !== false),
+           staff: stRes.items, byId, idOfEmail, emailOfId };
 }
 
 const nameOfRow = p => (p && p.title) || '';
-const colourOf  = p => (p && p.colour) || '#B9B9C6';
+const colourOf  = p => safeColour(p && p.colour);
 
 /* MORE is the studio, Group is the main gym, and a class with no room — the
    Sunday run is outdoors — needs no clearance, so any coach can take it. */
@@ -335,10 +414,18 @@ export const getOpenBoard = webMethod(Permissions.SiteMember, async () => {
   const classOf = {}; plan.classes.forEach(c => { classOf[c._id] = c; });
   const shiftOf = {}; plan.shifts.forEach(s => { shiftOf[s._id] = s; });
 
-  const seRes = await wixData.query('Sessions').ge('date', today).limit(600).find(OPT);
+  /* Bounded to the next three months and ordered by date. Sessions accumulate
+     forever and the month arrows go forward indefinitely, so an unordered
+     limit would eventually drop an arbitrary slice — plausibly next week's. */
+  const [Y, M, D] = today.split('-').map(Number);
+  const h = new Date(Date.UTC(Y, M - 1, D + 90));
+  const horizon = `${h.getUTCFullYear()}-${pad(h.getUTCMonth() + 1)}-${pad(h.getUTCDate())}`;
+
+  const seRes = await findAll(wixData.query('Sessions')
+    .ge('date', today).le('date', horizon).ascending('date'), 600);
   const ids = seRes.items.map(s => s._id);
   const reqRes = ids.length
-    ? await wixData.query('CoverRequests').hasSome('sessionId', ids).limit(600).find(OPT)
+    ? await findAll(wixData.query('CoverRequests').hasSome('sessionId', ids), 600)
     : { items: [] };
 
   const reqBySession = {};
@@ -383,10 +470,15 @@ export const requestCover = webMethod(Permissions.SiteMember, async (sessionId, 
   if (s.status === 'covered') throw new Error('ALREADY_COVERED');
   if (s.ownerId === staff._id) throw new Error('NOT_YOURS');
 
+  /* The plan can move under a handover — a class gets retired, or shifted to
+     another day. The board already hides those; the method has to refuse them
+     too, or a stale screen can still put somebody on a class that is gone. */
   const row = s.kind === 'class'
     ? await wixData.get('Classes', s.refId, OPT)
     : await wixData.get('Shifts', s.refId, OPT);
-  if (!row) throw new Error('NOT_FOUND');
+  if (!row || row.active === false || Number(row.weekday) !== weekdayOf(s.date)) {
+    throw new Error('NOT_FOUND');
+  }
   if (!canCover(staff, s.kind, describe(s.kind, row, s.date).discipline)) {
     throw new Error('NOT_CLEARED');
   }
@@ -436,10 +528,11 @@ export const getAdminQueue = webMethod(Permissions.SiteMember, async (ym) => {
   const classOf = {}; plan.classes.forEach(c => { classOf[c._id] = c; });
   const shiftOf = {}; plan.shifts.forEach(s => { shiftOf[s._id] = s; });
 
-  const seRes = await wixData.query('Sessions').startsWith('date', ym).limit(600).find(OPT);
+  const seRes = await findAll(
+    wixData.query('Sessions').startsWith('date', ym).ascending('date'), 600);
   const ids = seRes.items.map(s => s._id);
   const reqRes = ids.length
-    ? await wixData.query('CoverRequests').hasSome('sessionId', ids).limit(600).find(OPT)
+    ? await findAll(wixData.query('CoverRequests').hasSome('sessionId', ids), 600)
     : { items: [] };
 
   const reqBySession = {};
@@ -450,7 +543,14 @@ export const getAdminQueue = webMethod(Permissions.SiteMember, async (ym) => {
     const row = s.kind === 'class' ? classOf[s.refId] : shiftOf[s.refId];
     if (!row) return;
     const d = describe(s.kind, row, s.date);
-    const all = (reqBySession[s._id] || []).filter(r => r.status !== 'declined');
+    /* The session is the truth about who is covering. Without transactions,
+       two admins assigning at the same moment can leave an approved request
+       the session does not agree with; reading it back as undecided puts it in
+       front of an admin again instead of letting it sit there invisibly. */
+    const all = (reqBySession[s._id] || [])
+      .filter(r => r.status !== 'declined')
+      .map(r => (r.status === 'approved' && s.coveredById !== r.staffId)
+        ? { ...r, status: 'pending' } : r);
     const undecided = all.some(r => r.status === 'pending');
     const base = { sessionId: s._id, name: d.name, date: s.date, time: d.time,
                    ownerName: nameOfRow(plan.byId[s.ownerId]), status: s.status };
@@ -491,8 +591,20 @@ export const assignCover = webMethod(Permissions.SiteMember, async (requestId) =
   if (typeof requestId !== 'string') throw new Error('BAD_INPUT');
   const r = await wixData.get('CoverRequests', requestId, OPT);
   if (!r) throw new Error('NOT_FOUND');
+  /* A request another admin has already turned down is not on offer. */
+  if (r.status === 'declined') throw new Error('DECLINED');
   const s = await wixData.get('Sessions', r.sessionId, OPT);
   if (!s) throw new Error('NOT_FOUND');
+
+  /* The session is written first, deliberately: it is what every screen reads,
+     so if the rest fails the worst case is a tidy-up, not a session that says
+     it is covered with nobody named against it. */
+  s.status = 'covered';
+  s.coveredById = r.staffId;
+  await wixData.update('Sessions', s, OPT);
+
+  r.status = 'approved';
+  await wixData.update('CoverRequests', r, OPT);
 
   /* Anyone previously assigned goes back to undecided; the others are left
      alone so the admin declines them deliberately rather than by side effect. */
@@ -501,12 +613,6 @@ export const assignCover = webMethod(Permissions.SiteMember, async (requestId) =
   await Promise.all(others.items
     .filter(x => x._id !== r._id)
     .map(x => { x.status = 'pending'; return wixData.update('CoverRequests', x, OPT); }));
-
-  s.status = 'covered';
-  s.coveredById = r.staffId;
-  await wixData.update('Sessions', s, OPT);
-  r.status = 'approved';
-  await wixData.update('CoverRequests', r, OPT);
   return { ok: true };
 });
 
@@ -515,6 +621,15 @@ export const declineRequest = webMethod(Permissions.SiteMember, async (requestId
   if (typeof requestId !== 'string') throw new Error('BAD_INPUT');
   const r = await wixData.get('CoverRequests', requestId, OPT);
   if (!r) throw new Error('NOT_FOUND');
+
+  /* Declining the person who is already covering it would leave the session
+     covered by someone whose request says no — and they would keep seeing it
+     on their month. Two admins with the queue open produce this in one click.
+     Changing the cover is the deliberate way to undo an assignment. */
+  const s = await wixData.get('Sessions', r.sessionId, OPT);
+  if (s && s.status === 'covered' && s.coveredById === r.staffId) {
+    throw new Error('IS_COVERING');
+  }
   r.status = 'declined';
   await wixData.update('CoverRequests', r, OPT);
   return { ok: true };
@@ -539,15 +654,21 @@ export const unassignCover = webMethod(Permissions.SiteMember, async (sessionId)
 /* ------------------------------------------------------------- front desk */
 export const getFrontDesk = webMethod(Permissions.SiteMember, async (ym) => {
   const staff = await requireStaff();
+  /* This screen is hours, adjustments and shift counts per person — payroll.
+     The element only offers the tab to admins and front desk; the method has
+     to say so too, or any coach can read the whole team's pay. */
+  if (!isAdmin(staff) && !list(staff.roles).includes('frontdesk')) {
+    throw new Error('NOT_ALLOWED');
+  }
   if (!isYm(ym)) ym = todayISO().slice(0, 7);
   const today = todayISO();
   const canEdit = isAdmin(staff);
   const plan = await loadPlan();
 
   const [aRes, seRes, oRes] = await Promise.all([
-    wixData.query('ShiftAssignments').startsWith('date', ym).limit(600).find(OPT),
-    wixData.query('Sessions').startsWith('date', ym).eq('kind', 'shift').limit(600).find(OPT),
-    wixData.query('ShiftOverrides').startsWith('date', ym).limit(600).find(OPT)
+    findAll(wixData.query('ShiftAssignments').startsWith('date', ym), 600),
+    findAll(wixData.query('Sessions').startsWith('date', ym).eq('kind', 'shift'), 600),
+    findAll(wixData.query('ShiftOverrides').startsWith('date', ym), 600)
   ]);
   const assignAt = {}; aRes.items.forEach(a => {
     assignAt[`${a.shiftId}|${a.date}`] = plan.idOfEmail[mail(a.staffEmail)] || null;
@@ -592,15 +713,27 @@ export const getFrontDesk = webMethod(Permissions.SiteMember, async (ym) => {
       rows.push({ shiftId: s._id, date, code: s.title || '', label: s.label || '',
         start: s.start || '', end: s.end || '', plannedHours: planned, hours: worked,
         staffId: assigned, staffName: nameOfRow(plan.byId[assigned]),
+        /* Who the hours actually count for — the plan, or whoever covered.
+           Sent so the screen can redo its own totals when somebody edits a
+           number, instead of showing a figure that no longer adds up. */
+        actualId: actual || null,
         status, past, canLogHours: canEdit || actual === staff._id });
     });
   });
 
   const fdStaff = plan.staff.filter(p => list(p.roles).includes('frontdesk')
     && p.active !== false);
-  const totalRows = fdStaff.map(p => {
-    const v = totals[p._id] || { n: 0, hours: 0, adj: 0 };
-    return { name: nameOfRow(p), colour: colourOf(p), n: v.n,
+
+  /* The table is the union of the current front desk and everyone who actually
+     has hours this month — not just the current front desk. Building it from
+     the roster alone meant somebody who left mid-month, or a coach an admin put
+     on a shift, worked and then disappeared from the total that payroll reads. */
+  const ids = fdStaff.map(p => p._id);
+  Object.keys(totals).forEach(id => { if (ids.indexOf(id) === -1) ids.push(id); });
+  const totalRows = ids.map(id => {
+    const p = plan.byId[id];
+    const v = totals[id] || { n: 0, hours: 0, adj: 0 };
+    return { id, name: nameOfRow(p) || 'Unknown', colour: colourOf(p), n: v.n,
       hours: Math.round(v.hours * 100) / 100, adj: Math.round(v.adj * 100) / 100 };
   }).sort((a, b) => b.hours - a.hours || a.name.localeCompare(b.name));
 
@@ -632,6 +765,7 @@ export const setShiftStaff = webMethod(Permissions.SiteMember, async (shiftId, d
 
   const title = `${shiftId}|${date}`;
   const found = await wixData.query('ShiftAssignments').eq('title', title).limit(1).find(OPT);
+  const before = found.items.length ? mail(found.items[0].staffEmail) : '';
   if (found.items.length) {
     const row = found.items[0];
     row.staffEmail = email;
@@ -639,6 +773,42 @@ export const setShiftStaff = webMethod(Permissions.SiteMember, async (shiftId, d
   } else {
     await wixData.insert('ShiftAssignments', { title, date, shiftId, staffEmail: email }, OPT);
   }
+  if (before === email) return { ok: true };
+
+  /* Naming somebody for a shift that had been handed over has to settle the
+     handover as well. Writing only the rota left the two disagreeing: the board
+     and the schedule still said "Needs cover", the open board still offered it
+     to anybody who fancied it, and the person actually standing there was not
+     counted in the month's hours. */
+  const sess = await wixData.query('Sessions')
+    .eq('title', `shift:${shiftId}:${date}`).limit(1).find(OPT);
+
+  if (sess.items.length) {
+    const s = sess.items[0];
+    if (staffId && s.ownerId === staffId) {
+      /* Put back on their own shift — there is nothing left to hand over. */
+      const reqs = await wixData.query('CoverRequests')
+        .eq('sessionId', s._id).limit(100).find(OPT);
+      await Promise.all(reqs.items.map(r => wixData.remove('CoverRequests', r._id, OPT)));
+      await wixData.remove('Sessions', s._id, OPT);
+    } else {
+      s.status = staffId ? 'covered' : 'open';
+      s.coveredById = staffId || null;
+      await wixData.update('Sessions', s, OPT);
+      /* Whoever had been approved was approved for the old arrangement. Back to
+         undecided, so an admin sees the request again rather than it standing
+         approved against somebody else's shift. */
+      const reqs = await wixData.query('CoverRequests')
+        .eq('sessionId', s._id).eq('status', 'approved').limit(100).find(OPT);
+      await Promise.all(reqs.items
+        .filter(r => r.staffId !== staffId)
+        .map(r => { r.status = 'pending'; return wixData.update('CoverRequests', r, OPT); }));
+    }
+  }
+
+  /* Hours logged against the person who was on it are not the new person's. */
+  const ov = await wixData.query('ShiftOverrides').eq('title', title).limit(1).find(OPT);
+  if (ov.items.length) await wixData.remove('ShiftOverrides', ov.items[0]._id, OPT);
   return { ok: true };
 });
 
@@ -665,8 +835,8 @@ export const getWeek = webMethod(Permissions.SiteMember, async (monday) => {
   const plan = await loadPlan();
 
   const [aRes, seRes] = await Promise.all([
-    wixData.query('ShiftAssignments').hasSome('date', dates).limit(200).find(OPT),
-    wixData.query('Sessions').hasSome('date', dates).limit(400).find(OPT)
+    findAll(wixData.query('ShiftAssignments').hasSome('date', dates), 200),
+    findAll(wixData.query('Sessions').hasSome('date', dates), 400)
   ]);
   const assignAt = {}; aRes.items.forEach(a => {
     assignAt[`${a.shiftId}|${a.date}`] = plan.idOfEmail[mail(a.staffEmail)] || null;
@@ -734,7 +904,8 @@ export const getTeamAbsences = webMethod(Permissions.SiteMember, async (ym) => {
   const classOf = {}; plan.classes.forEach(c => { classOf[c._id] = c; });
   const shiftOf = {}; plan.shifts.forEach(s => { shiftOf[s._id] = s; });
 
-  const seRes = await wixData.query('Sessions').startsWith('date', ym).limit(600).find(OPT);
+  const seRes = await findAll(
+    wixData.query('Sessions').startsWith('date', ym).ascending('date'), 600);
 
   const byPerson = {};
   seRes.items.forEach(s => {
