@@ -13,7 +13,8 @@ second copy of the backend, so the tests cannot quietly fall behind the code. If
 someone adds a new `wix-` import, the loader says so instead of failing oddly.
 
 `element.test.mjs` loads `src/public/custom-elements/blg-teamhub-month.js` into
-headless Chromium, renders all six screens, and drives the front desk hours box.
+headless Chromium, renders all six screens, and drives the hours box on both the
+front desk and My Month.
 
 ## What is actually covered
 
@@ -42,17 +43,33 @@ Each assertion is a bug that shipped, or nearly did — they come from the
   payroll), a non-admin cannot reach the admin queue, team absences or
   `setShiftStaff`.
 - **A colour cannot smuggle CSS**, and a query that would silently return fewer
-  rows than exist raises `TRUNCATED` instead.
+  rows than exist raises `TRUNCATED` instead — including when `totalCount` is
+  missing from the result and only `hasNext()` can tell.
+- **A class reassigned to a different coach after a handover** puts no phantom
+  tickable row on the new coach's month, while the owner and the coverer keep
+  theirs.
+- **A long id list still finds its rows**, so the `hasSome` batching stays in
+  place. Turn `CHUNK` off in the backend and this goes red.
+- **The mock replaces on update**, as the real `wixData` does — a partial update
+  loses its other fields here too, so one could not slip through green.
 - **The element** — typing hours keeps the value and the focus, the banner
-  updates without a redraw, the month total follows, and all six screens render
+  updates without a redraw, and the total follows **on both screens that have an
+  hours box**: the front desk card and the My Month tile. All six screens render
   with no console error.
 
 ## What this cannot tell you
 
 `wix-mocks.mjs` is a model of `wixData`, not `wixData`. It will not catch Wix
 surprising us: whether `getMember({ fieldsets: ['FULL'] })` really returns
-`loginEmail`, whether `bulkInsert` and `totalCount` behave as assumed, or
-whether Wix's Node ships timezone data. Those need the real thing. What this
+`loginEmail`, whether `bulkInsert`, `totalCount` and `hasNext()` behave as
+assumed, or whether Wix's Node ships timezone data. Those need the real thing.
+
+**The one to probe on launch day** is `hasSome`. A community report says it
+returns nothing at all — silently — once the list passes about a dozen values.
+Wix documents no such limit. The backend batches every `hasSome` into tens so it
+does not matter either way, but it is worth one real call to find out, because
+if the report is right then an unbatched build would have shown an empty admin
+queue and looked perfectly healthy doing it. What this
 does catch is our own logic going backwards, which is the failure that actually
 keeps happening.
 

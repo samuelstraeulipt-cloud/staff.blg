@@ -82,6 +82,42 @@ ok('focus survives', after.focused === true, after);
 ok('the banner says so', /Logged 4\.50/.test(after.banner), after.banner);
 ok('the month total follows it (8 → 8.5)', after.totals === true);
 
+console.log('\n— My month: logging hours moves the tile above the box —');
+const MONTH_FD = {
+  view: 'month', me: ME, ym: '2027-03', today: '2027-03-01',
+  items: [
+    { kind: 'shift', refId: 's1', date: '2027-03-02', time: '16:00\u201320:00',
+      name: 'Front desk \u2014 Tuesday eve', discipline: 'frontdesk', hours: 4, plannedHours: 4,
+      editableHours: true, state: 'planned', note: '', sessionId: null, selectable: true, requests: 0 },
+    { kind: 'shift', refId: 's1', date: '2027-03-09', time: '16:00\u201320:00',
+      name: 'Front desk \u2014 Tuesday eve', discipline: 'frontdesk', hours: 4, plannedHours: 4,
+      editableHours: true, state: 'planned', note: '', sessionId: null, selectable: true, requests: 0 }
+  ],
+  totals: { hours: 8 }
+};
+await set(MONTH_FD, 'ready', '');
+await page.waitForTimeout(60);
+const tileBefore = await page.evaluate(() => document.querySelector('blg-teamhub-month')
+  .shadowRoot.querySelector('[data-statscard]').textContent);
+ok('the tile starts at 8.00 h', /8\.00/.test(tileBefore), tileBefore);
+
+const mbox = await page.evaluateHandle(() => document.querySelector('blg-teamhub-month')
+  .shadowRoot.querySelector('input[data-ov]'));
+ok('my month has an hours box too', await mbox.evaluate(n => !!n));
+await mbox.evaluate(n => { n.focus(); n.value = '3.5'; n.dispatchEvent(new Event('change', { bubbles: true })); });
+await set(null, null, 'Logged 3.50 h for 2027-03-02.');
+await page.waitForTimeout(80);
+
+const mAfter = await page.evaluate(() => {
+  const sr = document.querySelector('blg-teamhub-month').shadowRoot;
+  const i = sr.querySelector('input[data-ov]');
+  return { value: i && i.value, focused: sr.activeElement === i,
+    tile: sr.querySelector('[data-statscard]').textContent };
+});
+ok('the box keeps 3.5', mAfter.value === '3.5', mAfter.value);
+ok('focus survives here too', mAfter.focused === true, mAfter);
+ok('the tile follows it (8.00 \u2192 7.50)', /7\.50/.test(mAfter.tile), mAfter.tile);
+
 console.log('\n— every screen still renders —');
 const SCREENS = {
   month: { view: 'month', me: ME, ym: '2027-03', today: '2027-03-01',

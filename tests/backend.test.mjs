@@ -139,10 +139,60 @@ const board = await T.getFrontDesk(YM);
 ok('a bad colour falls back', (board.totals.find(t => t.name === 'Bea Lang') || {}).colour === '#B9B9C6',
   (board.totals.find(t => t.name === 'Bea Lang') || {}).colour);
 
+console.log('\n— N1: a class reassigned after a handover —');
+world(); as('anna');
+await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D1 }]);
+const ns = db.Sessions[0];
+as('bea'); await T.requestCover(ns._id, 'want');
+as('cara'); await T.assignCover(db.CoverRequests[0]._id);
+db.Classes[0].coachEmail = 'dan@blg.ch';        // an admin hands the class to Dan
+const rowFor = async who => { as(who); const m = await T.getMyMonth(YM);
+  return m.items.find(i => i.date === D1 && i.kind === 'class'); };
+ok('the new coach gets no phantom row', !(await rowFor('dan')), await rowFor('dan'));
+ok('the original owner still sees it covered', ((await rowFor('anna')) || {}).state === 'covered');
+ok('the coverer still sees it', ((await rowFor('bea')) || {}).state === 'covering');
+world(); as('anna');
+ok('a class with no handover still shows for its coach',
+  !!(await T.getMyMonth(YM)).items.find(i => i.date === D1 && i.kind === 'class'));
+
+console.log('\n— the hasSome batching —');
+world(); as('anna');
+/* More ids than any plausible hasSome limit, so a single-query implementation
+   that quietly returns nothing would show up here. */
+const many = [];
+for (let i = 0; i < 40; i++) {
+  db.Sessions.push({ _id: 'S' + i, title: 'class:c1:2027-03-02#' + i, kind: 'class',
+    refId: 'c1', date: '2027-03-02', ownerId: 'anna', status: 'open', coveredById: null });
+  db.CoverRequests.push({ _id: 'R' + i, title: 'S' + i + '|bea', sessionId: 'S' + i,
+    staffId: 'bea', kind: 'want', status: 'pending' });
+  many.push('S' + i);
+}
+as('cara');
+const q = await T.getAdminQueue(YM);
+ok('a long id list still finds its rows', q.queue.length === 40, q.queue.length);
+
+console.log('\n— the mock replaces on update, as Wix does —');
+world();
+db.Sessions.push({ _id: 'Z1', title: 't', kind: 'class', refId: 'c1', date: D1,
+  ownerId: 'anna', status: 'open', coveredById: null });
+await (await import('./wix-mocks.mjs')).default.update('Sessions', { _id: 'Z1', status: 'covered' });
+ok('a partial update loses the other fields (so the suite would catch one)',
+  db.Sessions.find(r => r._id === 'Z1').ownerId === undefined);
+
 console.log('\n— M5: truncation is an error, not a silent gap —');
 world(); as('anna');
 for (let i = 0; i < 700; i++) db.Sessions.push({ _id: 'x' + i, title: 't' + i, kind: 'class', refId: 'c1', date: YM + '-15', ownerId: 'anna', status: 'open' });
 await threw('a month with more rows than the limit', () => T.getMyMonth(YM), 'TRUNCATED');
+/* The guard must not depend on totalCount alone: if the live runtime omits it
+   for some query shape, hasNext() still has to bite. */
+world(); as('anna');
+for (let i = 0; i < 700; i++) db.Sessions.push({ _id: 'y' + i, title: 'u' + i, kind: 'class', refId: 'c1', date: YM + '-15', ownerId: 'anna', status: 'open' });
+const mocks = await import('./wix-mocks.mjs');
+const realQuery = mocks.default.query;
+mocks.default.query = name => { const q = realQuery(name); const f = q.find.bind(q);
+  q.find = async () => { const r = await f(); delete r.totalCount; return r; }; return q; };
+await threw('...even when totalCount is missing', () => T.getMyMonth(YM), 'TRUNCATED');
+mocks.default.query = realQuery;
 
 console.log('\n' + (fail ? 'FAILED ' + fail : 'all green') + '  (' + pass + ' passed)');
 process.exit(fail ? 1 : 0);

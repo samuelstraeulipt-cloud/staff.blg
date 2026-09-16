@@ -43,7 +43,10 @@ class Q {
     let all = (db[this.name] || []).filter(r => this.fs.every(f => f(r)));
     if (this._asc) all = all.slice().sort((a, b) =>
       String(a[this._asc]).localeCompare(String(b[this._asc])));
-    return { items: all.slice(0, this._limit).map(r => ({ ...r })), totalCount: all.length };
+    const items = all.slice(0, this._limit).map(r => ({ ...r }));
+    /* Both signals the real result carries, so `findAll` can be tested using
+       either one on its own. */
+    return { items, totalCount: all.length, hasNext: () => all.length > items.length };
   }
 }
 
@@ -56,11 +59,15 @@ const wixData = {
     rows.forEach(row => (db[name] ||= []).push({ _id: id(), _createdDate: new Date(), ...row }));
     return { inserted: rows.length, skipped: 0, errors: [] };
   },
+  /* REPLACES, it does not merge — which is what the real one does. A partial
+     update like `update('Sessions', { _id, status })` silently wipes every
+     other field in production; merging here would let that pass the suite. */
   async update(name, row) {
     CALLS++;
     const i = (db[name] || []).findIndex(x => x._id === row._id);
     if (i < 0) throw new Error('missing');
-    db[name][i] = { ...db[name][i], ...row };
+    const kept = db[name][i];
+    db[name][i] = { _id: kept._id, _createdDate: kept._createdDate, ...row };
     return { ...db[name][i] };
   },
   async remove(name, rid) {

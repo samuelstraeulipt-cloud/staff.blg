@@ -62,10 +62,41 @@ const safeColour = c =>
    A payroll number that is wrong in silence is worse than a screen that errors. */
 async function findAll(query, cap) {
   const res = await query.limit(cap).find(OPT);
-  if (typeof res.totalCount === 'number' && res.totalCount > res.items.length) {
-    throw new Error('TRUNCATED');
-  }
+  /* Two checks, because either signal can be missing. `totalCount` is the
+     clearer one but is not guaranteed to be populated for every query shape,
+     and a guard that is silently inert is precisely the failure it exists to
+     prevent; `hasNext()` is always on the result object. */
+  const counted = typeof res.totalCount === 'number' && res.totalCount > res.items.length;
+  const more = typeof res.hasNext === 'function' && res.hasNext();
+  if (counted || more) throw new Error('TRUNCATED');
   return res;
+}
+
+/* `hasSome` is reported to return *nothing at all* — silently, no error — once
+   the list passes roughly a dozen values. Wix documents no such limit, so this
+   may be one person's misconfiguration; but if it is real the blast radius is
+   the whole tool. A month hands ~190 session ids to `hasSome('sessionId', …)`,
+   and an admin queue that quietly comes back empty means nobody can approve
+   anything while nothing looks broken. So every such lookup goes out in small
+   batches and is stitched back together — cheap, and harmless if the limit
+   turns out to be a myth. Set CHUNK to 0 to go back to one query.
+   Covered by "a long id list still finds its rows" in the backend suite. */
+const CHUNK = 10;
+async function findIn(collection, field, values, cap) {
+  const uniq = Array.from(new Set(values));
+  if (!uniq.length) return { items: [] };
+  if (!CHUNK || uniq.length <= CHUNK) {
+    return findAll(wixData.query(collection).hasSome(field, uniq), cap);
+  }
+  const parts = [];
+  for (let i = 0; i < uniq.length; i += CHUNK) parts.push(uniq.slice(i, i + CHUNK));
+  const res = await Promise.all(parts.map(p =>
+    findAll(wixData.query(collection).hasSome(field, p), cap)));
+  const seen = {}, items = [];
+  res.forEach(r => r.items.forEach(it => {
+    if (!seen[it._id]) { seen[it._id] = true; items.push(it); }
+  }));
+  return { items };
 }
 
 /* ------------------------------------------------------------------ identity */
@@ -151,9 +182,7 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
      handed a class over can see whether anyone has yet without leaving the
      screen. Declined requests do not count — they are no longer on offer. */
   const sessIds = seRes.items.map(s => s._id);
-  const reqRes = sessIds.length
-    ? await findAll(wixData.query('CoverRequests').hasSome('sessionId', sessIds), 600)
-    : { items: [] };
+  const reqRes = await findIn('CoverRequests', 'sessionId', sessIds, 600);
   const reqCount = {};
   reqRes.items.forEach(r => {
     if (r.status !== 'declined') reqCount[r.sessionId] = (reqCount[r.sessionId] || 0) + 1;
@@ -182,13 +211,18 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
        Dropping it — which is what excluding a covered owner did — meant a class
        you were waiting on simply vanished the moment it was sorted out, with no
        way to see who took it, and the `covered` state below was never reached.
-       The session's own ownerId is checked as well as the plan's, so a handover
-       survives the class being reassigned to a different coach afterwards. */
+
+       Once a session exists it is the only thing that decides whose row this is,
+       and the plan is ignored. That matters when a class changes hands in the
+       CMS after a handover: going by the plan as well would put a plain, tickable
+       row on the *new* coach's month for a date that is already handed over and
+       covered by somebody else. The handover follows the people named on it. */
     classes.filter(c => Number(c.weekday) === wd).forEach(c => {
       const sess = sessionAt[`class:${c._id}:${date}`];
       const owner = idOfEmail[mail(c.coachEmail)];
-      const mine = (owner && owner === staff._id)
-                || (sess && (sess.ownerId === staff._id || sess.coveredById === staff._id));
+      const mine = sess
+        ? (sess.ownerId === staff._id || sess.coveredById === staff._id)
+        : owner === staff._id;
       if (!mine) return;
       push({ kind: 'class', refId: c._id, date, time: c.start || '', name: c.title || '',
              discipline: c.discipline || '', hours: billed(c.minutes),
@@ -199,8 +233,12 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
       const key = `${s._id}|${date}`;
       const owner = assignAt[key];
       const sess = sessionAt[`shift:${s._id}:${date}`];
-      const mine = (owner && owner === staff._id)
-                || (sess && (sess.ownerId === staff._id || sess.coveredById === staff._id));
+      /* Same rule as classes above. `setShiftStaff` keeps the rota and the
+         session in step, so this cannot drift through the app — but it can
+         through a direct edit in the CMS, and the session should still win. */
+      const mine = sess
+        ? (sess.ownerId === staff._id || sess.coveredById === staff._id)
+        : owner === staff._id;
       if (!mine) return;
       const planned = Number(s.hours) || 0;
       const worked = overrideAt[key] === undefined ? planned : Number(overrideAt[key]);
@@ -250,8 +288,8 @@ export const recordAbsences = webMethod(Permissions.SiteMember, async (picks) =>
   const dates = Object.keys(want.reduce((a, w) => { a[w.date] = 1; return a; }, {}));
   const [plan, aRes, dupRes] = await Promise.all([
     loadPlan(),
-    findAll(wixData.query('ShiftAssignments').hasSome('date', dates), 600),
-    findAll(wixData.query('Sessions').hasSome('title', want.map(w => w.title)), 100)
+    findIn('ShiftAssignments', 'date', dates, 600),
+    findIn('Sessions', 'title', want.map(w => w.title), 100)
   ]);
 
   const classOf = {}; plan.classes.forEach(c => { classOf[c._id] = c; });
@@ -424,9 +462,7 @@ export const getOpenBoard = webMethod(Permissions.SiteMember, async () => {
   const seRes = await findAll(wixData.query('Sessions')
     .ge('date', today).le('date', horizon).ascending('date'), 600);
   const ids = seRes.items.map(s => s._id);
-  const reqRes = ids.length
-    ? await findAll(wixData.query('CoverRequests').hasSome('sessionId', ids), 600)
-    : { items: [] };
+  const reqRes = await findIn('CoverRequests', 'sessionId', ids, 600);
 
   const reqBySession = {};
   reqRes.items.forEach(r => { (reqBySession[r.sessionId] ||= []).push(r); });
@@ -531,9 +567,7 @@ export const getAdminQueue = webMethod(Permissions.SiteMember, async (ym) => {
   const seRes = await findAll(
     wixData.query('Sessions').startsWith('date', ym).ascending('date'), 600);
   const ids = seRes.items.map(s => s._id);
-  const reqRes = ids.length
-    ? await findAll(wixData.query('CoverRequests').hasSome('sessionId', ids), 600)
-    : { items: [] };
+  const reqRes = await findIn('CoverRequests', 'sessionId', ids, 600);
 
   const reqBySession = {};
   reqRes.items.forEach(r => { (reqBySession[r.sessionId] ||= []).push(r); });
@@ -705,6 +739,10 @@ export const getFrontDesk = webMethod(Permissions.SiteMember, async (ym) => {
         status = past ? { tone: 'neutral', text: 'Done' } : { tone: 'ok', text: 'Planned' };
       }
 
+      /* NOTE: the element recomputes exactly this sum in `_applyHours`, so that
+         typing an hours figure updates the card without a reload. If the rule
+         here changes — what counts, how it rounds, who it credits — change it
+         there too, or the screen and the payroll figure will quietly disagree. */
       if (actual) {
         const t = (totals[actual] ||= { n: 0, hours: 0, adj: 0 });
         t.n++; t.hours += worked; t.adj += worked - planned;
@@ -835,8 +873,8 @@ export const getWeek = webMethod(Permissions.SiteMember, async (monday) => {
   const plan = await loadPlan();
 
   const [aRes, seRes] = await Promise.all([
-    findAll(wixData.query('ShiftAssignments').hasSome('date', dates), 200),
-    findAll(wixData.query('Sessions').hasSome('date', dates), 400)
+    findIn('ShiftAssignments', 'date', dates, 200),
+    findIn('Sessions', 'date', dates, 400)
   ]);
   const assignAt = {}; aRes.items.forEach(a => {
     assignAt[`${a.shiftId}|${a.date}`] = plan.idOfEmail[mail(a.staffEmail)] || null;

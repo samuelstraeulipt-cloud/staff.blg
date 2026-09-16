@@ -657,11 +657,15 @@
       });
       if (planned !== null) el.classList.toggle('on', v !== planned);
 
-      /* The month's totals move with it, so redraw that card and nothing else. */
-      var card = this.shadowRoot && this.shadowRoot.querySelector('[data-totalscard]');
-      if (card && this._data && Array.isArray(this._data.totals)) {
-        card.innerHTML = this._totalsBody(this._data);
-      }
+      /* The totals move with it, so redraw those and nothing else. Front desk
+         keeps a per-person card; My Month keeps the tiles at the top. Both have
+         to be patched — doing only the front desk left somebody logging hours on
+         their own month watching the tile above the box refuse to budge. */
+      var sr = this.shadowRoot, d2 = this._data;
+      var card = sr && sr.querySelector('[data-totalscard]');
+      if (card && d2 && Array.isArray(d2.totals)) card.innerHTML = this._totalsBody(d2);
+      var stats = sr && sr.querySelector('[data-statscard]');
+      if (stats && d2 && d2.items) stats.innerHTML = this._monthStats(d2);
 
       this._emit('teamhub:hours', { shiftId: bits[0], date: bits[1], hours: v });
     }
@@ -805,6 +809,22 @@
         '</div>' + (actions ? '<div class="actions">' + actions + '</div>' : '') + '</div>';
     }
 
+    /* The four tiles at the top of My Month, on their own so an hours edit can
+       redraw them without rebuilding the list underneath. */
+    _monthStats(d) {
+      var me = d.me, items = d.items || [], today = d.today;
+      var mineOpen = items.filter(function (i) { return i.state === 'needsCover' && i.date >= today; });
+      var covering = items.filter(function (i) { return i.state === 'covering'   && i.date >= today; });
+      var totalHours = items.reduce(function (n, i) {
+        return (i.state === 'needsCover' || i.state === 'covered') ? n : n + Number(i.hours || 0);
+      }, 0);
+      return statTile(items.length,
+          isFD(me) && !isCoach(me) ? 'Shifts this month' : 'Sessions this month') +
+        statTile(hrs(totalHours) + ' h', 'Hours this month') +
+        statTile(mineOpen.length, 'Waiting for cover', mineOpen.length ? 'var(--danger)' : null) +
+        statTile(covering.length, "You're covering", 'var(--green-600)');
+    }
+
     _month(d, message, state) {
       var me = d.me;
       var ym = d.ym;
@@ -815,9 +835,6 @@
 
       var mineOpen  = items.filter(function (i) { return i.state === 'needsCover' && i.date >= today; });
       var covering  = items.filter(function (i) { return i.state === 'covering'   && i.date >= today; });
-      var totalHours = items.reduce(function (n, i) {
-        return (i.state === 'needsCover' || i.state === 'covered') ? n : n + Number(i.hours || 0);
-      }, 0);
 
       out.push(this._flash(message, state));
 
@@ -830,12 +847,9 @@
           ' this month — tick anything you can’t make and it goes out for cover</p>' +
         '</div></div>');
 
-      out.push('<div class="stats">' +
-        statTile(items.length, isFD(me) && !isCoach(me) ? 'Shifts this month' : 'Sessions this month') +
-        statTile(hrs(totalHours) + ' h', 'Hours this month') +
-        statTile(mineOpen.length, 'Waiting for cover', mineOpen.length ? 'var(--danger)' : null) +
-        statTile(covering.length, "You're covering", 'var(--green-600)') +
-        '</div>');
+      /* Tagged for the same reason as the front desk totals card: typing an
+         hours figure has to move the number above it without a full redraw. */
+      out.push('<div class="stats" data-statscard="1">' + this._monthStats(d) + '</div>');
 
       /* ------------------------------------------- the group chat message */
       if (this._share && this._share.length) {
