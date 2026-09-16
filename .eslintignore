@@ -1,0 +1,3 @@
+# The Wix lint config is about site code and assumes the Velo environment.
+# tests/ is plain Node ESM and runs outside Wix entirely.
+tests/

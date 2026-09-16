@@ -3,11 +3,15 @@
     "@wix/cli": "^1.0.0",
     "@wix/eslint-plugin-cli": "^1.0.0",
     "eslint": "^8.25.0",
+    "playwright": "^1.49.0",
     "react": "16.14.0"
   },
   "scripts": {
     "postinstall": "wix sync-types",
     "dev": "wix dev",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "npm run test:backend && npm run test:element",
+    "test:backend": "node tests/backend.test.mjs",
+    "test:element": "node tests/element.test.mjs"
   }
 }

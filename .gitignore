@@ -4,3 +4,7 @@ node_modules/
 .idea/
 .wix/
 jsconfig.json
+
+# local scratch
+.DS_Store
+.gitparked/
