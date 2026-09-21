@@ -551,7 +551,7 @@ export const getOpenBoard = webMethod(Permissions.SiteMember, async () => {
   const reqRes = await findIn('CoverRequests', 'sessionId', ids, 600);
 
   const reqBySession = {};
-  reqRes.items.forEach(r => { (reqBySession[r.sessionId] ||= []).push(r); });
+  reqRes.items.forEach(r => { (reqBySession[r.sessionId] = reqBySession[r.sessionId] || []).push(r); });
 
   const mine = [], covered = [];
   seRes.items.forEach(s => {
@@ -656,7 +656,7 @@ export const getAdminQueue = webMethod(Permissions.SiteMember, async (ym) => {
   const reqRes = await findIn('CoverRequests', 'sessionId', ids, 600);
 
   const reqBySession = {};
-  reqRes.items.forEach(r => { (reqBySession[r.sessionId] ||= []).push(r); });
+  reqRes.items.forEach(r => { (reqBySession[r.sessionId] = reqBySession[r.sessionId] || []).push(r); });
 
   const queue = [], noAsk = [], coveredList = [];
   seRes.items.forEach(s => {
@@ -857,7 +857,7 @@ export const getFrontDesk = webMethod(Permissions.SiteMember, async (ym) => {
          here changes — what counts, how it rounds, who it credits — change it
          there too, or the screen and the payroll figure will quietly disagree. */
       if (actual) {
-        const t = (totals[actual] ||= { n: 0, hours: 0, adj: 0 });
+        const t = (totals[actual] = totals[actual] || { n: 0, hours: 0, adj: 0 });
         t.n++; t.hours += worked; t.adj += worked - planned;
       }
 
@@ -1063,7 +1063,7 @@ export const getTeamAbsences = webMethod(Permissions.SiteMember, async (ym) => {
     const row = s.kind === 'class' ? classOf[s.refId] : shiftOf[s.refId];
     if (!row) return;
     const d = describe(s.kind, row, s.date);
-    (byPerson[s.ownerId] ||= []).push({ date: s.date, time: d.time, name: d.name,
+    (byPerson[s.ownerId] = byPerson[s.ownerId] || []).push({ date: s.date, time: d.time, name: d.name,
       status: s.status, coveredByName: nameOfRow(plan.byId[s.coveredById]) });
   });
 
