@@ -1,16 +1,26 @@
 /* =============================================================================
    BLG TeamHub — page code
-   The only place where Wix and the element meet. It makes sure somebody is
-   signed in, fetches whichever screen the element asks for, and relays what
-   the user does back to the backend.
+   The only place where Wix and the element meet. It decides whether to show
+   the sign-in screen or the app, fetches whichever screen the element asks
+   for, and relays what the user does back to the backend.
+
+   The page itself is public on purpose. A members-only page would make Wix
+   show its own login popup before this code ever ran, and the sign-in screen
+   is part of the app. Nothing on it is protected by the page setting anyway:
+   every piece of data comes from the backend, which refuses anyone who is not
+   signed in *and* on the staff list.
+
+   Sign-in and sign-out use `@wix/site` (install it once in the editor's
+   package manager). The older `wix-members-frontend` login and logout are
+   deprecated from 30 September 2026.
 
    The element never names a collection or a method — it emits an intention and
    this file decides what that costs. Adding a screen means adding a loader
    here and a renderer there, and nothing else changes.
    ========================================================================== */
-import { authentication, currentMember } from 'wix-members-frontend';
+import { authentication } from '@wix/site';
 import {
-  whoAmI,
+  whoAmI, requestAccess,
   getMyMonth, recordAbsences, undoAbsence, logHours,
   getOpenBoard, requestCover, withdrawRequest,
   getAdminQueue, assignCover, declineRequest, unassignCover, cancelHandover,
@@ -40,18 +50,41 @@ const LOADERS = {
 $w.onReady(async function () {
   el = $w(ELEMENT_ID);
 
-  /* The page should already be members-only, so this is a safety net rather
-     than the lock itself. */
-  const member = await currentMember.getMember();
-  if (!member) {
+  /* --------------------------------------------------------- getting in */
+  el.on('teamhub:login', async (event) => {
+    if (busy) return;
+    const d = event.detail || {};
+    busy = true;
+    el.setAttribute('state', 'loading');
     try {
-      await authentication.promptLogin({ mode: 'login' });
-    } catch (e) {
-      say('error', 'You need to be signed in to see your month.');
-      return;
+      await authentication.login(String(d.email || '').trim(), String(d.password || ''));
+      busy = false;
+      await start();
+    } catch (err) {
+      busy = false;
+      say('error', loginProblem(err));
     }
-  }
+  });
 
+  /* The answer is the same whether or not the address is on the list, and the
+     backend never says which — so neither can this. */
+  el.on('teamhub:access', async (event) => {
+    if (busy) return;
+    const email = String((event.detail && event.detail.email) || '').trim();
+    busy = true;
+    el.setAttribute('state', 'loading');
+    try { await requestAccess(email); } catch (e) { /* same answer regardless */ }
+    busy = false;
+    showLogin({ mode: 'sent', email });
+  });
+
+  el.on('teamhub:logout', async () => {
+    try { await authentication.logout(); } catch (e) { /* signed out either way */ }
+    view = 'month'; ym = null; monday = null;
+    showLogin({}, 'You’re signed out.');
+  });
+
+  /* ---------------------------------------------------------- the app */
   el.on('teamhub:view', (event) => {
     const next = event.detail && event.detail.view;
     if (LOADERS[next]) { view = next; load(); }
@@ -102,16 +135,57 @@ $w.onReady(async function () {
     () => setShiftStaff(event.detail.shiftId, event.detail.date, event.detail.staffId),
     'Shift updated.'));
 
-  /* An admin's job starts at the approval queue, so that is where they land.
-     Everyone else opens on their own month. One cheap call decides it — and if
-     it fails, the month loader reports the reason properly. */
-  try {
-    const who = await whoAmI();
-    if (who && who.ok && (who.me.roles || []).includes('admin')) view = 'admin';
-  } catch (e) { /* fall through to the month, which will explain itself */ }
-
-  load();
+  let signedIn = false;
+  try { signedIn = !!(await authentication.loggedIn()); } catch (e) { signedIn = false; }
+  if (!signedIn) { showLogin(); return; }
+  start();
 });
+
+/* Signed in: find out who you are before showing anything. An admin's job
+   starts at the approval queue, so that is where they land; everyone else
+   opens on their own month. Somebody signed in to the website but not on the
+   staff list gets told so, with a way to sign out — not an empty app. */
+async function start() {
+  let who = null;
+  try { who = await whoAmI(); } catch (e) { who = null; }
+  if (who && !who.ok) { fail(new Error(who.reason || '')); return; }
+  view = (who && who.ok && (who.me.roles || []).includes('admin')) ? 'admin' : 'month';
+  await load();
+}
+
+function showLogin(extra, note, state) {
+  el.setAttribute('data', JSON.stringify(Object.assign({ view: 'login' }, extra || {})));
+  el.setAttribute('state', state || 'ready');
+  el.setAttribute('message', note || '');
+}
+
+/* Wix does not document what login throws for which case, so the wording
+   covers both likely ones rather than guessing wrongly at one. */
+function loginProblem(err) {
+  const msg = String((err && (err.message || err.details)) || '');
+  if (/pending|approv/i.test(msg)) {
+    return 'Your account is waiting for approval. Ask Chris or Sam to approve it.';
+  }
+  return 'That email and password don’t match. First time here, or forgot it? ' +
+    'Use “Get a link by email” below.';
+}
+
+/* Where an error lands depends on what it means. Signed out: back to the
+   sign-in screen. Signed in but not a colleague: the blocked screen, which
+   offers a way out. Anything else: the banner on the screen you are on. */
+const BLOCKED = ['NO_STAFF_RECORD', 'STAFF_INACTIVE', 'EMAIL_UNVERIFIED', 'DUPLICATE_STAFF_EMAIL'];
+function fail(err) {
+  const code = String((err && err.message) || '');
+  if (code.includes('NOT_SIGNED_IN')) {
+    showLogin({}, 'You were signed out. Sign in again.', 'error');
+    return;
+  }
+  if (BLOCKED.some(c => code.includes(c))) {
+    showLogin({ signedIn: true }, explain(err), 'error');
+    return;
+  }
+  say('error', explain(err));
+}
 
 /* --------------------------------------------------------------- loading */
 async function load(note) {
@@ -128,7 +202,7 @@ async function load(note) {
     el.setAttribute('state', 'ready');
     if (note) el.setAttribute('message', note);
   } catch (err) {
-    say('error', explain(err));
+    fail(err);
   } finally {
     busy = false;
   }
@@ -148,7 +222,7 @@ async function act(run, note) {
     await load(typeof said === 'string' ? said : note);
   } catch (err) {
     busy = false;
-    say('error', explain(err));
+    fail(err);
   }
 }
 
@@ -193,7 +267,7 @@ async function onAbsences(picks) {
       : 'Nothing to record — those sessions were already handed over.');
   } catch (err) {
     busy = false;
-    say('error', explain(err));
+    fail(err);
   }
 }
 
@@ -204,6 +278,6 @@ async function onHours(d) {
     await logHours(d.shiftId, d.date, d.hours);
     el.setAttribute('message', 'Logged ' + Number(d.hours).toFixed(2) + ' h for ' + d.date + '.');
   } catch (err) {
-    say('error', explain(err));
+    fail(err);
   }
 }

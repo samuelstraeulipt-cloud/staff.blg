@@ -24,6 +24,38 @@ export const currentMember = {
   }
 };
 
+/* Site accounts, as far as requestAccess can see them: `register` fails for an
+   address that already has an account (login emails are unique on a site),
+   manual approval leaves new accounts PENDING, and every email that would have
+   gone out lands in OUTBOX instead. */
+export const ACCOUNTS = [];     // { email, password, status }
+export const OUTBOX = [];       // { to, kind }
+export let POLICY = 'manual';   // 'manual' | 'open'
+export function setPolicy(p) { POLICY = p; }
+export function resetAccounts() { ACCOUNTS.length = 0; OUTBOX.length = 0; POLICY = 'manual'; }
+const norm = e => String(e || '').trim().toLowerCase();
+export const authentication = {
+  async register(email, password, options) {
+    if (ACCOUNTS.find(a => norm(a.email) === norm(email))) {
+      throw new Error('-19995: member with this email already exists');
+    }
+    const status = POLICY === 'manual' ? 'PENDING' : 'ACTIVE';
+    ACCOUNTS.push({ email: norm(email), password, status, options });
+    return { status, approvalToken: status === 'PENDING' ? 'tok-' + email : undefined };
+  },
+  async approveByEmail(email) {
+    const a = ACCOUNTS.find(x => norm(x.email) === norm(email));
+    if (!a) throw new Error('member not found');
+    a.status = 'ACTIVE';
+    return 'session-token';
+  },
+  async sendSetPasswordEmail(email) {
+    const a = ACCOUNTS.find(x => norm(x.email) === norm(email));
+    if (!a) throw new Error('member not found');
+    OUTBOX.push({ to: norm(email), kind: 'set-password' });
+  }
+};
+
 export let CALLS = 0;
 export function calls() { return CALLS; }
 export function resetCalls() { CALLS = 0; }

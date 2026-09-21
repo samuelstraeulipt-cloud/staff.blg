@@ -42,6 +42,16 @@ Each assertion is a bug that shipped, or nearly did — they come from the
 - **Every role check** — a plain coach cannot read the front desk (it is
   payroll), a non-admin cannot reach the admin queue, team absences or
   `setShiftStaff`.
+- **Getting in** — only an active email on the Staff list gets an account; an
+  outsider gets exactly the same answer and nothing is created; an account
+  somebody else registered with a colleague's address is never approved by the
+  code; one email per address per ten minutes; junk input writes nothing. In
+  the browser: Enter submits, a wrong password keeps the email but not the
+  password, the confirmation is neutral, markup typed into the email box is
+  shown as text, and there is a way to sign out from the top bar and from the
+  "not on the team list" screen.
+- **A CSV-imported "FALSE" means inactive** — text "false", "no" or "0" switch
+  a row off; "TRUE" and a blank leave it on.
 - **Cancelling a handover** removes the session and its requests, puts the
   session back on its owner's month as a normal tickable row, takes it off the
   coverer's, and is refused for anyone who is not an admin. In the browser it

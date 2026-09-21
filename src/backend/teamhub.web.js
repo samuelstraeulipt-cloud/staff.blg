@@ -5,7 +5,7 @@
    class plan and rota before anything is written.
    ========================================================================== */
 import { Permissions, webMethod } from 'wix-web-module';
-import { currentMember } from 'wix-members-backend';
+import { currentMember, authentication } from 'wix-members-backend';
 import wixData from 'wix-data';
 
 const OPT = { suppressAuth: true };
@@ -46,6 +46,13 @@ function todayISO() {
 }
 const isYm = v => typeof v === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(v);
 const isDate = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+
+/* "Is this row switched off?" A CSV import can bring `active` in as the text
+   "FALSE" rather than a real false, and `"FALSE" !== false` would quietly count
+   a departed coach as active. Anything that reads as false, no, 0 or off is
+   off; a blank or missing value is on, so a row nobody has touched still shows. */
+const isOff = v => v === false || v === 0 ||
+  /^(false|no|nein|0|off)$/i.test(String(v == null ? '' : v).trim());
 
 /* Classes are paid as whole hours — a 55-minute slot counts as 1.00. */
 const billed = mins => Math.max(1, Math.ceil((Number(mins) || 0) / 60));
@@ -114,7 +121,7 @@ async function requireStaff() {
   const byId = await wixData.query('Staff').eq('memberId', member._id).limit(1).find(OPT);
   if (byId.items.length) {
     const s = byId.items[0];
-    if (s.active === false) throw new Error('STAFF_INACTIVE');
+    if (isOff(s.active)) throw new Error('STAFF_INACTIVE');
     return s;
   }
   const email = mail(member.loginEmail);
@@ -135,7 +142,7 @@ async function requireStaff() {
   if (hits.length > 1) throw new Error('DUPLICATE_STAFF_EMAIL');
 
   const staff = hits[0];
-  if (staff.active === false) throw new Error('STAFF_INACTIVE');
+  if (isOff(staff.active)) throw new Error('STAFF_INACTIVE');
 
   staff.memberId = member._id;
   await wixData.update('Staff', staff, OPT);
@@ -165,8 +172,8 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
     findAll(wixData.query('ShiftOverrides').startsWith('date', ym), 600),
     findAll(wixData.query('Staff'), 500)
   ]);
-  const classes = cRes.items.filter(c => c.active !== false);
-  const shifts  = sRes.items.filter(s => s.active !== false);
+  const classes = cRes.items.filter(c => !isOff(c.active));
+  const shifts  = sRes.items.filter(s => !isOff(s.active));
 
   const nameOf = {}, idOfEmail = {};
   stRes.items.forEach(p => { nameOf[p._id] = p.title; idOfEmail[mail(p.email)] = p._id; });
@@ -387,6 +394,85 @@ async function worksShift(staff, shiftId, date) {
   return (await emailToId(a.items[0].staffEmail)) === staff._id;
 }
 
+/* ------------------------------------------------------------ getting in */
+/* The one method anybody can call, signed in or not — it is how a new coach
+   gets an account in the first place. It is therefore also the one an outsider
+   can call, so it is written to give nothing away and to grant nothing.
+
+   - Only an email on the live Staff list, marked active, ever gets an account.
+     Anything else is silently ignored.
+   - The answer is the same in every case. An outsider cannot use this form to
+     find out who works at BLG.
+   - It never approves an account it did not just create itself. If somebody
+     signed up through Wix's own form with a coach's address, that account is
+     waiting for approval with *their* password; approving it here would hand
+     them the coach's access. So a pre-existing account is only ever sent the
+     set-password email, and approving it stays a human decision.
+   - A newly created account gets a long random password nobody sees, and the
+     set-password email is the only way in: whoever controls the inbox sets the
+     real one.
+   - One email per address per ten minutes, so the form cannot be used to flood
+     a colleague's inbox. */
+const ACCESS_COOLDOWN_MS = 10 * 60 * 1000;
+const looksLikeEmail = e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) && e.length <= 200;
+
+function throwawayPassword() {
+  const bytes = new Uint8Array(24);
+  const c = globalThis.crypto;
+  if (c && typeof c.getRandomValues === 'function') c.getRandomValues(bytes);
+  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  /* Letters, digits and a symbol, so it passes any password rule Wix applies. */
+  return 'Th!' + Array.from(bytes, b => b.toString(36).padStart(2, '0')).join('') + '9a';
+}
+
+export const requestAccess = webMethod(Permissions.Anyone, async (rawEmail) => {
+  const NEUTRAL = { ok: true };
+  const email = mail(rawEmail);
+  if (!looksLikeEmail(email)) return NEUTRAL;
+
+  try {
+    const all = await findAll(wixData.query('Staff'), 500);
+    const hits = all.items.filter(p => mail(p.email) === email);
+    /* Exactly one active row, or nothing happens. Two rows with one email is
+       the corruption requireStaff already refuses; no point creating an
+       account that then cannot sign in. */
+    if (hits.length !== 1 || isOff(hits[0].active)) return NEUTRAL;
+    const staff = hits[0];
+
+    const last = Date.parse(staff.accessEmailAt || '') || 0;
+    if (Date.now() - last < ACCESS_COOLDOWN_MS) return NEUTRAL;
+    staff.accessEmailAt = new Date().toISOString();
+    await wixData.update('Staff', staff, OPT);
+
+    /* A bound row means the account certainly exists. Otherwise try to create
+       it: registering an address that already has an account fails, and that
+       failure is how we learn it existed — in which case it is not ours to
+       approve. Checking first is not possible without a second members API
+       that needs elevated permissions from here. */
+    if (!staff.memberId) {
+      let created = null;
+      try {
+        const name = String(staff.title || '').trim().split(/\s+/);
+        created = await authentication.register(email, throwawayPassword(), {
+          contactInfo: { firstName: name[0] || '', lastName: name.slice(1).join(' ') }
+        });
+      } catch (e) {
+        created = null;                                   // already had an account
+      }
+      if (created && created.status === 'PENDING') {
+        await authentication.approveByEmail(email);       // ours, so ours to approve
+      }
+    }
+
+    await authentication.sendSetPasswordEmail(email, { hideIgnoreMessage: true });
+  } catch (e) {
+    /* Whatever went wrong, the visitor sees the same sentence. The failure is
+       still in the site's logs, which is where an admin would look. */
+    console.error('requestAccess failed', e && e.message);
+  }
+  return NEUTRAL;
+});
+
 /* A member who isn't on the staff list gets a plain explanation, not a blank screen. */
 export const whoAmI = webMethod(Permissions.SiteMember, async () => {
   try { return { ok: true, me: pub(await requireStaff()) }; }
@@ -415,8 +501,8 @@ async function loadPlan(ym) {
     idOfEmail[mail(p.email)] = p._id;
     emailOfId[p._id] = mail(p.email);
   });
-  return { classes: cRes.items.filter(c => c.active !== false),
-           shifts: shRes.items.filter(s => s.active !== false),
+  return { classes: cRes.items.filter(c => !isOff(c.active)),
+           shifts: shRes.items.filter(s => !isOff(s.active)),
            staff: stRes.items, byId, idOfEmail, emailOfId };
 }
 
@@ -512,7 +598,7 @@ export const requestCover = webMethod(Permissions.SiteMember, async (sessionId, 
   const row = s.kind === 'class'
     ? await wixData.get('Classes', s.refId, OPT)
     : await wixData.get('Shifts', s.refId, OPT);
-  if (!row || row.active === false || Number(row.weekday) !== weekdayOf(s.date)) {
+  if (!row || isOff(row.active) || Number(row.weekday) !== weekdayOf(s.date)) {
     throw new Error('NOT_FOUND');
   }
   if (!canCover(staff, s.kind, describe(s.kind, row, s.date).discipline)) {
@@ -787,7 +873,7 @@ export const getFrontDesk = webMethod(Permissions.SiteMember, async (ym) => {
   });
 
   const fdStaff = plan.staff.filter(p => list(p.roles).includes('frontdesk')
-    && p.active !== false);
+    && !isOff(p.active));
 
   /* The table is the union of the current front desk and everyone who actually
      has hours this month — not just the current front desk. Building it from

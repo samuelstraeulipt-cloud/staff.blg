@@ -19,7 +19,7 @@
          setAttribute('state', 'loading' | 'ready' | 'error')
          setAttribute('message', 'text to show in the banner')
 
-         `view` is one of: month | open | admin | frontdesk | schedule | team.
+         `view` is one of: login | month | open | admin | frontdesk | schedule | team.
          If it is missing the payload is treated as a month, so the original
          page code keeps working untouched.
 
@@ -36,6 +36,9 @@
          teamhub:unassign  { sessionId }                    admin
          teamhub:cancel    { sessionId }                    admin — the handover is off
          teamhub:setshift  { shiftId, date, staffId }       admin, front desk
+         teamhub:login     { email, password }              sign-in screen
+         teamhub:access    { email }                        first time / forgot password
+         teamhub:logout    {}                               top bar, or a blocked account
 
    The payload each view expects is documented above its renderer below. The
    backend is written to those shapes, so the two halves cannot drift.
@@ -320,6 +323,32 @@
     '  background:var(--green-tint);color:#00623C}',
     '.flash-in.err{background:var(--danger-tint);color:#A3272B}',
 
+    /* ---------------------------------------------------------- sign in */
+    '.auth{display:flex;justify-content:center;padding:56px 16px 48px}',
+    '.auth-card{width:100%;max-width:420px;background:var(--card);border:1px solid var(--line);',
+    '  border-radius:var(--r-card);overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.04)}',
+    '.auth-head{background:var(--black);padding:20px 26px}',
+    '.auth-body{padding:26px 26px 22px}',
+    '.auth-title{font-family:var(--f-head);font-weight:700;font-size:22px;margin:0 0 6px}',
+    '.auth-sub{font-size:13.5px;color:var(--muted);margin:0 0 20px;line-height:1.55}',
+    '.auth .flash{margin:0 0 16px;padding:0;max-width:none}',
+    '.fld{display:block;margin-bottom:14px}',
+    '.fld span{display:block;font-family:var(--f-head);font-size:11px;font-weight:600;',
+    '  letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}',
+    '.fld input{width:100%;height:44px;padding:0 13px;font-size:15px;border:1px solid var(--line);',
+    '  border-radius:10px;background:#fff;color:var(--text);font-family:var(--f-body)}',
+    '.fld input:focus{outline:none;border-color:var(--green-600);box-shadow:0 0 0 3px var(--green-tint)}',
+    '.auth .btn-wide{width:100%;height:46px;justify-content:center}',
+    '.auth-alt{margin-top:16px;text-align:center;font-size:13px;color:var(--muted)}',
+    '.linkbtn{background:none;border:0;padding:0;color:var(--text);text-decoration:underline;',
+    '  cursor:pointer;font:inherit}',
+    '.auth-note{margin-top:20px;padding-top:16px;border-top:1px solid var(--line-2);',
+    '  font-size:12px;color:var(--muted);line-height:1.55}',
+    '.signout{background:none;border:1px solid rgba(255,255,255,.25);color:#C9CDD2;height:30px;',
+    '  padding:0 12px;border-radius:999px;font-family:var(--f-head);font-weight:600;font-size:10.5px;',
+    '  letter-spacing:.06em;text-transform:uppercase;cursor:pointer}',
+    '.signout:hover{color:#fff;border-color:#fff}',
+
     /* --------------------------------------------------- group message */
     '.wa{background:#0B0B0C;border-radius:14px;padding:18px 20px;color:#E9EBEE;',
     '  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;',
@@ -451,6 +480,7 @@
       '<div class="topbar-right"><div class="who">' + avatar(me, 30) +
       '<span><span class="who-name">' + esc(me.name) + '</span><br>' +
       '<span class="who-role">' + esc(roleLabel(me)) + '</span></span></div>' +
+      '<button type="button" class="signout" data-signout="1">Sign out</button>' +
       '</div></div></header>';
   }
 
@@ -494,20 +524,25 @@
       this._sel = {};            // key -> {kind, refId, date}
       this._share = null;        // array of items whose message is being shown
       this._confirm = null;      // sessionId whose cancel is one click from real
+      this._authMode = null;     // 'login' | 'access' on the sign-in screen
+      this._authEmail = '';      // kept across redraws; the password never is
       this._onClick = this._onClick.bind(this);
       this._onChange = this._onChange.bind(this);
+      this._onSubmit = this._onSubmit.bind(this);
     }
 
     connectedCallback() {
       this._loadFonts();
       this.shadowRoot.addEventListener('click', this._onClick);
       this.shadowRoot.addEventListener('change', this._onChange);
+      this.shadowRoot.addEventListener('submit', this._onSubmit);
       this._render();
     }
 
     disconnectedCallback() {
       this.shadowRoot.removeEventListener('click', this._onClick);
       this.shadowRoot.removeEventListener('change', this._onChange);
+      this.shadowRoot.removeEventListener('submit', this._onSubmit);
     }
 
     attributeChangedCallback(name, oldV, newV) {
@@ -524,6 +559,7 @@
           this._data = JSON.parse(newV);
           this._sel = {};        // a fresh month starts unticked
           this._confirm = null;  // and no half-pressed buttons
+          this._authMode = null; // the page decides which sign-in screen comes next
         } catch (e) {
           this._data = null;
         }
@@ -561,7 +597,7 @@
             '[data-pick],[data-clear],[data-record],[data-undo],[data-msg],' +
             '[data-closeshare],[data-copy],[data-copytable],[data-go],[data-req],' +
             '[data-withdraw],[data-assign],[data-decline],[data-unassign],' +
-            '[data-askcancel],[data-nocancel],[data-cancel]')
+            '[data-askcancel],[data-nocancel],[data-cancel],[data-authmode],[data-signout]')
         : null;
       if (!el) return;
 
@@ -630,6 +666,14 @@
         return;
       }
 
+      if (el.dataset.authmode) {
+        this._authMode = el.dataset.authmode;
+        if (this._data && this._data.mode === 'sent') this._data.mode = null;
+        this._render();
+        return;
+      }
+      if (el.dataset.signout) { this._emit('teamhub:logout', {}); return; }
+
       if (el.dataset.copy) { this._copy(el, null); return; }
       if (el.dataset.copytable) { this._copy(el, this._accountingTable()); return; }
 
@@ -646,6 +690,32 @@
         }
         this._render();
       }
+    }
+
+    /* The sign-in forms. Enter submits, as a form should. The password goes
+       straight out in the event and is never kept — a redraw after a wrong
+       attempt clears it, while the email survives so nobody retypes it. */
+    _onSubmit(ev) {
+      var form = ev.target;
+      if (!form || !form.dataset || !form.dataset.authform) return;
+      ev.preventDefault();
+      var val = function (n) {
+        var i = form.querySelector('input[name="' + n + '"]');
+        return i ? String(i.value || '') : '';
+      };
+      var email = val('email').trim();
+      this._authEmail = email;
+      if (!email || email.indexOf('@') < 1) {
+        this._patchFlash('Enter the email address you use at BLG.', 'error');
+        return;
+      }
+      if (form.dataset.authform === 'access') {
+        this._emit('teamhub:access', { email: email });
+        return;
+      }
+      var password = val('password');
+      if (!password) { this._patchFlash('Enter your password.', 'error'); return; }
+      this._emit('teamhub:login', { email: email, password: password });
     }
 
     _onChange(ev) {
@@ -773,6 +843,14 @@
       var d = this._data;
       var body;
 
+      /* Signed out, the sign-in screen is the whole page: no top bar, no tabs,
+         nothing to see until the backend knows who you are. */
+      if (d && d.view === 'login') {
+        this.shadowRoot.innerHTML = '<style>' + CSS + '</style><div class="app">' +
+          this._login(d, message, state) + '</div>';
+        return;
+      }
+
       if (state === 'error') {
         body = '<div class="page"><div class="card"><div class="empty">' +
           esc(message || 'Something went wrong. Reload the page and try again.') +
@@ -809,6 +887,81 @@
       if (!message) return '';
       return '<div class="flash-in' + (state === 'error' ? ' err' : '') + '">' +
         esc(message) + '</div>';
+    }
+
+    /* ======================================================== sign in
+       { view:'login', mode?:'sent', email?, signedIn? }
+       Four states on one card. The person switches between signing in and
+       asking for a link themselves; the page decides the two that follow a
+       round trip — the email has gone out, or you are signed in to the site
+       but not on the team list. */
+    _login(d, message, state) {
+      var mode = d.signedIn ? 'blocked'
+        : (this._authMode || (d.mode === 'sent' ? 'sent' : 'login'));
+      var busy = state === 'loading';
+      var email = esc(this._authEmail || d.email || '');
+      var dis = busy ? ' disabled' : '';
+      var out = ['<div class="auth"><div class="auth-card">' +
+        '<div class="auth-head"><div class="logo"><span class="logo-mark">BLG</span>' +
+        '<span class="logo-word">TEAM<span>HUB</span></span></div></div>' +
+        '<div class="auth-body">'];
+
+      if (mode === 'blocked') {
+        out.push('<h1 class="auth-title">This account can’t open TeamHub</h1>' +
+          '<p class="auth-sub">You’re signed in to the BLG website, but not as someone on ' +
+            'the team list.</p>' +
+          this._flash(message, 'error') +
+          '<button type="button" class="btn btn-dark btn-wide" data-signout="1">' +
+            'Sign out</button>');
+      } else if (mode === 'sent') {
+        /* The same words whether or not the address was on the list — that is
+           the point. Nobody can use this form to learn who works at BLG. */
+        out.push('<h1 class="auth-title">Check your inbox</h1>' +
+          '<p class="auth-sub">If <strong>' + email + '</strong> is on the BLG team list, ' +
+            'you’ll get an email shortly with a link to set your password. The link ' +
+            'works for three hours.</p>' +
+          this._flash(message, state) +
+          '<button type="button" class="btn btn-primary btn-wide" data-authmode="login">' +
+            'Back to sign in</button>' +
+          '<div class="auth-alt">Nothing after a few minutes? Check spam, then ask Chris or ' +
+            'Sam whether your address is on the list.</div>');
+      } else if (mode === 'access') {
+        out.push('<h1 class="auth-title">First time, or forgot your password?</h1>' +
+          '<p class="auth-sub">Enter the email you use at BLG. If it’s on the team list, ' +
+            'we’ll send you a link to set a password.</p>' +
+          this._flash(message, state) +
+          '<form data-authform="access" novalidate>' +
+            '<label class="fld"><span>Email</span>' +
+              '<input name="email" type="email" autocomplete="email" value="' + email + '"' +
+              dis + '></label>' +
+            '<button type="submit" class="btn btn-primary btn-wide"' + dis + '>' +
+              (busy ? 'Sending…' : 'Email me a link') + '</button>' +
+          '</form>' +
+          '<div class="auth-alt"><button type="button" class="linkbtn" data-authmode="login">' +
+            'Back to sign in</button></div>');
+      } else {
+        out.push('<h1 class="auth-title">Sign in</h1>' +
+          '<p class="auth-sub">For BLG staff — your classes, cover and front desk hours.</p>' +
+          this._flash(message, state) +
+          '<form data-authform="login" novalidate>' +
+            '<label class="fld"><span>Email</span>' +
+              '<input name="email" type="email" autocomplete="username" value="' + email + '"' +
+              dis + '></label>' +
+            '<label class="fld"><span>Password</span>' +
+              '<input name="password" type="password" autocomplete="current-password"' +
+              dis + '></label>' +
+            '<button type="submit" class="btn btn-primary btn-wide"' + dis + '>' +
+              (busy ? 'Signing in…' : 'Sign in') + '</button>' +
+          '</form>' +
+          '<div class="auth-alt">First time here, or forgot your password? ' +
+            '<button type="button" class="linkbtn" data-authmode="access">' +
+            'Get a link by email</button></div>');
+      }
+
+      out.push('<div class="auth-note">Accounts are only for people on the BLG team list. ' +
+        'If you should be on it and aren’t, ask Chris or Sam.</div>' +
+        '</div></div></div>');
+      return out.join('');
     }
 
     /* Swap just the banner. Returns false if there is no page to patch yet. */

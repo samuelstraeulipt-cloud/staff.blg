@@ -8,3 +8,6 @@ jsconfig.json
 # local scratch
 .DS_Store
 .gitparked/
+
+# never commit: holds real staff emails, and this repo is public
+Claude outputs/

@@ -27,6 +27,8 @@ const set = (data, state, message) => page.evaluate(([d, s, m]) => {
   if (m !== null) el.setAttribute('message', m);
 }, [data, state, message]);
 
+const SCREENS_FOR_SIGNOUT = () => ({ view: 'schedule', me: ME, monday: '2027-03-01',
+  label: 'Week', prevMonday: '2027-02-22', nextMonday: '2027-03-08', days: [] });
 const ME = { id: 'anna', name: 'Anna Meier', first: 'Anna',
   roles: ['coach', 'frontdesk', 'admin'], disciplines: ['group'], colour: '#00E583' };
 
@@ -173,6 +175,100 @@ await page.evaluate(() => document.querySelector('blg-teamhub-month')
 await page.waitForTimeout(80);
 ok('the second click fires it, once', cancels.length === 1 && cancels[0].sessionId === 'n1', cancels);
 ok('and the button disarms', (await sr()).armed === 0);
+
+console.log('\n— sign in —');
+const auth = [];
+await page.exposeFunction('noteAuth', (t, d) => auth.push({ t, d }));
+await page.evaluate(() => {
+  const e = document.querySelector('blg-teamhub-month');
+  ['teamhub:login', 'teamhub:access', 'teamhub:logout'].forEach(t =>
+    e.addEventListener(t, ev => window.noteAuth(t, ev.detail)));
+});
+const R = () => page.evaluate(() => {
+  const r = document.querySelector('blg-teamhub-month').shadowRoot;
+  const q = s => r.querySelector(s);
+  return { login: !!q('form[data-authform="login"]'), access: !!q('form[data-authform="access"]'),
+    topbar: !!q('.topbar'), email: (q('input[name="email"]') || {}).value,
+    pw: (q('input[name="password"]') || {}).value, text: r.textContent,
+    flash: (q('.flash-in') || {}).className || '', imgs: r.querySelectorAll('img').length,
+    signout: !!q('[data-signout]') };
+});
+const typeIn = (name, v) => page.evaluate(([n, v]) => {
+  document.querySelector('blg-teamhub-month').shadowRoot
+    .querySelector('input[name="' + n + '"]').value = v; }, [name, v]);
+const submit = kind => page.evaluate(k => {
+  document.querySelector('blg-teamhub-month').shadowRoot
+    .querySelector('form[data-authform="' + k + '"]').requestSubmit(); }, kind);
+const clickSel = sel => page.evaluate(q => document.querySelector('blg-teamhub-month')
+  .shadowRoot.querySelector(q).click(), sel);
+
+await set({ view: 'login' }, 'ready', '');
+await page.waitForTimeout(60);
+let a1 = await R();
+ok('signed out, the sign-in form is the whole page', a1.login && !a1.topbar, a1);
+
+await submit('login');
+await page.waitForTimeout(40);
+a1 = await R();
+ok('an empty form sends nothing and says why', auth.length === 0 && /err/.test(a1.flash), a1.flash);
+
+await typeIn('email', 'anna@blg.ch'); await typeIn('password', 's3cret');
+await submit('login');
+await page.waitForTimeout(40);
+ok('Enter submits email and password', auth.length === 1 && auth[0].t === 'teamhub:login'
+  && auth[0].d.email === 'anna@blg.ch' && auth[0].d.password === 's3cret', auth);
+
+/* What the page does on a wrong password. */
+await set(null, 'error', 'That email and password don\u2019t match.');
+await page.waitForTimeout(60);
+a1 = await R();
+ok('after a failed attempt the email is still there', a1.email === 'anna@blg.ch', a1.email);
+ok('...the password is not', !a1.pw, a1.pw);
+ok('...and the banner is an error', /err/.test(a1.flash), a1.flash);
+
+await clickSel('[data-authmode="access"]');
+await page.waitForTimeout(40);
+a1 = await R();
+ok('"Get a link by email" switches forms, keeping the email', a1.access && a1.email === 'anna@blg.ch', a1);
+await submit('access');
+await page.waitForTimeout(40);
+ok('asking for a link sends only the email', auth[1] && auth[1].t === 'teamhub:access'
+  && auth[1].d.email === 'anna@blg.ch' && !('password' in auth[1].d), auth[1]);
+
+/* Typed by the visitor, so it is what the screen shows back. */
+const EVIL = '"><img src=x onerror=alert(1)>@x.ch';
+await typeIn('email', EVIL);                    // still on the "email me a link" form
+await submit('access');
+await page.waitForTimeout(30);
+await set({ view: 'login', mode: 'sent', email: EVIL }, 'ready', '');
+await page.waitForTimeout(60);
+a1 = await R();
+ok('the confirmation is the neutral one', /If .* is on the BLG team list/.test(a1.text), a1.text.slice(0, 200));
+ok('...and an address full of markup is shown as text, not run', a1.imgs === 0, a1.imgs);
+await clickSel('[data-authmode="login"]');
+await page.waitForTimeout(40);
+await clickSel('[data-authmode="access"]');
+await page.waitForTimeout(30);
+a1 = await R();
+ok('...and put back in the email box as a value, not markup', a1.imgs === 0 && a1.email === EVIL, a1);
+await clickSel('[data-authmode="login"]');
+await page.waitForTimeout(30);
+ok('"Back to sign in" returns to the form', (await R()).login);
+
+await set({ view: 'login', signedIn: true }, 'error', 'Your account is not on the BLG staff list yet.');
+await page.waitForTimeout(60);
+a1 = await R();
+ok('signed in but not staff: told so, with a way out', /not on the BLG staff list/.test(a1.text) && a1.signout);
+await clickSel('[data-signout]');
+await page.waitForTimeout(40);
+ok('...and signing out asks the page to do it', auth[auth.length - 1].t === 'teamhub:logout');
+
+await set(SCREENS_FOR_SIGNOUT(), 'ready', '');
+await page.waitForTimeout(60);
+const before = auth.length;
+await clickSel('.topbar [data-signout]');
+await page.waitForTimeout(40);
+ok('the top bar has a sign-out too', auth.length === before + 1 && auth[before].t === 'teamhub:logout');
 
 console.log('\n— every screen still renders —');
 const SCREENS = {

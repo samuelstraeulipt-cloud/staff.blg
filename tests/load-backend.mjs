@@ -17,8 +17,8 @@ export async function loadBackend() {
   const code = fs.readFileSync(file, 'utf8')
     .replace(/^import \{ Permissions, webMethod \} from 'wix-web-module';$/m,
       `import { Permissions, webMethod } from '${mocks}';`)
-    .replace(/^import \{ currentMember \} from 'wix-members-backend';$/m,
-      `import { currentMember } from '${mocks}';`)
+    .replace(/^import \{ currentMember, authentication \} from 'wix-members-backend';$/m,
+      `import { currentMember, authentication } from '${mocks}';`)
     .replace(/^import wixData from 'wix-data';$/m,
       `import wixData from '${mocks}';`);
 

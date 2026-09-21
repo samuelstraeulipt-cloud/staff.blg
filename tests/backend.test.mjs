@@ -1,6 +1,7 @@
 /* Every assertion here is a bug that was actually shipped, or nearly was. If one
    of these goes red, something in the 16 September code review has come back. */
-import { seed, reset, setMember, resetCalls, calls, db } from './wix-mocks.mjs';
+import { seed, reset, setMember, resetCalls, calls, db,
+  ACCOUNTS, OUTBOX, resetAccounts, setPolicy } from './wix-mocks.mjs';
 import { loadBackend } from './load-backend.mjs';
 
 const T = await loadBackend();
@@ -161,6 +162,95 @@ as('cara');
 ok('the front desk shows it planned, not needing cover',
   (await T.getFrontDesk(YM)).rows.find(r => r.date === D1).status.text === 'Planned');
 await threw('cancelling something already gone', () => T.cancelHandover(ss._id), 'NOT_FOUND');
+
+console.log('\n— getting in: only the staff list gets an account —');
+const acct = e => ACCOUNTS.find(x => x.email === e);
+const mailsTo = e => OUTBOX.filter(m => m.to === e).length;
+
+world(); resetAccounts(); setMember(null);
+const outsider = await T.requestAccess('stranger@example.com');
+ok('an email not on the list creates nothing', ACCOUNTS.length === 0 && OUTBOX.length === 0);
+ok('...and does not touch the Staff list', !db.Staff.some(p => p.accessEmailAt));
+const insider = await T.requestAccess('anna@blg.ch');
+ok('...and gets exactly the same answer as a listed one',
+  JSON.stringify(outsider) === JSON.stringify(insider), { outsider, insider });
+ok('a listed email gets an account', !!acct('anna@blg.ch'));
+ok('...that the code approved itself', (acct('anna@blg.ch') || {}).status === 'ACTIVE',
+  acct('anna@blg.ch'));
+ok('...with a long random password nobody is told',
+  String((acct('anna@blg.ch') || {}).password || '').length >= 40);
+ok('...and one set-password email', mailsTo('anna@blg.ch') === 1, OUTBOX);
+ok('the Staff row keeps every field after the cooldown is stamped',
+  (db.Staff.find(p => p._id === 'anna') || {}).roles === 'coach,frontdesk'
+  && !!db.Staff.find(p => p._id === 'anna').accessEmailAt);
+
+await T.requestAccess('anna@blg.ch');
+ok('asking again within ten minutes sends nothing more', mailsTo('anna@blg.ch') === 1);
+db.Staff.find(p => p._id === 'anna').accessEmailAt = new Date(Date.now() - 11 * 60000).toISOString();
+await T.requestAccess('anna@blg.ch');
+ok('after ten minutes it sends again (a reset)', mailsTo('anna@blg.ch') === 2);
+ok('...without creating a second account', ACCOUNTS.length === 1, ACCOUNTS.length);
+
+world(); resetAccounts();
+await T.requestAccess('  BEA@Blg.CH ');
+ok('case and spaces do not matter', !!acct('bea@blg.ch') && mailsTo('bea@blg.ch') === 1);
+
+world(); resetAccounts();
+db.Staff.find(p => p._id === 'bea').active = false;
+await T.requestAccess('bea@blg.ch');
+ok('an inactive colleague gets nothing', ACCOUNTS.length === 0 && OUTBOX.length === 0);
+
+world(); resetAccounts();
+db.Staff.push({ _id: 'bea2', title: 'Bea Twin', email: 'bea@blg.ch', roles: 'coach' });
+await T.requestAccess('bea@blg.ch');
+ok('a duplicated email gets nothing', ACCOUNTS.length === 0 && OUTBOX.length === 0);
+
+world(); resetAccounts();
+const before = JSON.stringify(db.Staff);
+await T.requestAccess('not an email');
+await T.requestAccess('x'.repeat(300) + '@blg.ch');
+ok('junk input writes nothing at all', JSON.stringify(db.Staff) === before && OUTBOX.length === 0);
+
+/* The attack this is designed around: someone signs up through Wix's own form
+   with a coach's address and their own password. Manual approval parks it. */
+world(); resetAccounts();
+ACCOUNTS.push({ email: 'cara@blg.ch', password: 'impostor-knows-this', status: 'PENDING' });
+await T.requestAccess('cara@blg.ch');
+ok('an account somebody else created is NOT approved',
+  acct('cara@blg.ch').status === 'PENDING', acct('cara@blg.ch'));
+ok('...and its password is untouched by us', acct('cara@blg.ch').password === 'impostor-knows-this');
+ok('...but the real inbox still gets the set-password link', mailsTo('cara@blg.ch') === 1);
+
+world(); resetAccounts();
+ACCOUNTS.push({ email: 'dan@blg.ch', password: 'his own', status: 'ACTIVE' });
+db.Staff.find(p => p._id === 'dan').memberId = 'm-dan';
+resetCalls();
+await T.requestAccess('dan@blg.ch');
+ok('a bound colleague just gets a reset link', mailsTo('dan@blg.ch') === 1 && ACCOUNTS.length === 1);
+
+world(); resetAccounts(); setPolicy('open');
+await T.requestAccess('anna@blg.ch');
+ok('works the same if the site does not require approval',
+  (acct('anna@blg.ch') || {}).status === 'ACTIVE' && mailsTo('anna@blg.ch') === 1);
+resetAccounts();
+
+console.log('\n— a CSV-imported "FALSE" means inactive —');
+world(); resetAccounts();
+db.Staff.find(p => p._id === 'bea').active = 'FALSE';
+db.Classes[0].active = 'false';
+await T.requestAccess('bea@blg.ch');
+ok('a text FALSE colleague gets no account', ACCOUNTS.length === 0);
+as('bea');
+await threw('...and cannot sign in', () => T.getMyMonth(YM), 'STAFF_INACTIVE');
+as('anna');
+ok('a text "false" class drops off the month',
+  !(await T.getMyMonth(YM)).items.some(i => i.kind === 'class'));
+db.Classes[0].active = 'TRUE';
+ok('while text "TRUE" still counts as on',
+  (await T.getMyMonth(YM)).items.some(i => i.kind === 'class'));
+db.Classes[0].active = '';
+ok('and a blank stays on, so an untouched row still shows',
+  (await T.getMyMonth(YM)).items.some(i => i.kind === 'class'));
 
 console.log('\n— M7: payroll is not public —');
 world(); as('dan');
