@@ -4,6 +4,7 @@
    member on every call, and every request is re-checked against the actual
    class plan and rota before anything is written.
    ========================================================================== */
+/* global globalThis */
 import { Permissions, webMethod } from 'wix-web-module';
 import { currentMember, authentication } from 'wix-members-backend';
 import wixData from 'wix-data';
@@ -58,6 +59,14 @@ const isOff = v => v === false || v === 0 ||
 const billed = mins => Math.max(1, Math.ceil((Number(mins) || 0) / 60));
 const list = s => String(s || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
 const mail = s => String(s || '').trim().toLowerCase();
+/* A class runs every week on its weekday — unless its `dates` field lists the
+   only days it runs ("2026-10-25, 2026-11-22"): the one-off specials such as
+   the HYROX introduction class or the full simulation. */
+function classRuns(c, date) {
+  if (!c || Number(c.weekday) !== weekdayOf(date)) return false;
+  const only = list(c.dates);
+  return !only.length || only.includes(date);
+}
 
 /* A colour reaches the browser as a style attribute. Escaping stops it
    breaking out of the quotes; only a shape check stops it being CSS. */
@@ -224,7 +233,7 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
        CMS after a handover: going by the plan as well would put a plain, tickable
        row on the *new* coach's month for a date that is already handed over and
        covered by somebody else. The handover follows the people named on it. */
-    classes.filter(c => Number(c.weekday) === wd).forEach(c => {
+    classes.filter(c => classRuns(c, date)).forEach(c => {
       const sess = sessionAt[`class:${c._id}:${date}`];
       const owner = idOfEmail[mail(c.coachEmail)];
       const mine = sess
@@ -312,7 +321,8 @@ export const recordAbsences = webMethod(Permissions.SiteMember, async (picks) =>
   want.forEach(w => {
     if (already[w.title]) return;
     const row = w.kind === 'class' ? classOf[w.refId] : shiftOf[w.refId];
-    if (!row || Number(row.weekday) !== weekdayOf(w.date)) return;
+    if (!row || (w.kind === 'class' ? !classRuns(row, w.date)
+                                     : Number(row.weekday) !== weekdayOf(w.date))) return;
     const owner = w.kind === 'class'
       ? plan.idOfEmail[mail(row.coachEmail)]
       : assignAt[`${w.refId}|${w.date}`];
@@ -598,7 +608,8 @@ export const requestCover = webMethod(Permissions.SiteMember, async (sessionId, 
   const row = s.kind === 'class'
     ? await wixData.get('Classes', s.refId, OPT)
     : await wixData.get('Shifts', s.refId, OPT);
-  if (!row || isOff(row.active) || Number(row.weekday) !== weekdayOf(s.date)) {
+  if (!row || isOff(row.active) || (s.kind === 'class' ? !classRuns(row, s.date)
+                                   : Number(row.weekday) !== weekdayOf(s.date))) {
     throw new Error('NOT_FOUND');
   }
   if (!canCover(staff, s.kind, describe(s.kind, row, s.date).discipline)) {
@@ -1002,7 +1013,7 @@ export const getWeek = webMethod(Permissions.SiteMember, async (monday) => {
   const days = dates.map((date, i) => {
     const wd = weekdayOf(date);
 
-    const classes = plan.classes.filter(c => Number(c.weekday) === wd)
+    const classes = plan.classes.filter(c => classRuns(c, date))
       .sort((a, b) => String(a.start).localeCompare(String(b.start)))
       .map(c => {
         const sess = sessionAt[`class:${c._id}:${date}`];

@@ -321,5 +321,24 @@ mocks.default.query = name => { const q = realQuery(name); const f = q.find.bind
 await threw('...even when totalCount is missing', () => T.getMyMonth(YM), 'TRUNCATED');
 mocks.default.query = realQuery;
 
+console.log('\n— one-off classes run only on their dates —');
+world(); as('anna');
+db.Classes.push({ _id: 'c9', title: 'HYROX Intro', weekday: 2, start: '10:00', minutes: 55,
+  discipline: 'group', coachEmail: 'anna@blg.ch', dates: D2 });
+m = await T.getMyMonth(YM);
+ok('it is on the month on its date', m.items.some(i => i.refId === 'c9' && i.date === D2),
+  m.items.filter(i => i.refId === 'c9').map(i => i.date));
+ok('...and on no other Tuesday', m.items.filter(i => i.refId === 'c9').length === 1,
+  m.items.filter(i => i.refId === 'c9').map(i => i.date));
+ok('the weekly class still runs every Tuesday', m.items.filter(i => i.refId === 'c1').length === 5);
+let wk = await T.getWeek(D1);
+ok('the schedule leaves it out of a week it does not run',
+  !JSON.stringify(wk).includes('HYROX Intro'));
+wk = await T.getWeek('2027-03-08');
+ok('...and shows it in the week it does', JSON.stringify(wk).includes('HYROX Intro'));
+await T.recordAbsences([{ kind: 'class', refId: 'c9', date: D1 }]);
+ok('an absence on a date it does not run records nothing',
+  !db.Sessions.some(x => x.refId === 'c9'), db.Sessions);
+
 console.log('\n' + (fail ? 'FAILED ' + fail : 'all green') + '  (' + pass + ' passed)');
 process.exit(fail ? 1 : 0);
