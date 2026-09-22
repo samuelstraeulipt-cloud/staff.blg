@@ -555,7 +555,12 @@
         if (old) return;
         const st = doc.createElement('style');
         st.id = 'blg-teamhub-chrome';
-        st.textContent = '#SITE_HEADER,#SITE_FOOTER,#SITE_HEADER-placeholder{display:none !important}';
+        /* The editor places the element a little below the top of its
+           section; without the header that offset shows as a white strip
+           above the black TeamHub bar, so it goes too. */
+        const box = this.parentElement && this.parentElement.id;
+        st.textContent = '#SITE_HEADER,#SITE_FOOTER,#SITE_HEADER-placeholder{display:none !important}' +
+          (box && /^[\w-]+$/.test(box) ? '#' + box + '{margin-top:0 !important}' : '');
         (doc.head || doc.documentElement).appendChild(st);
       } catch (e) { /* no page document to touch */ }
     }

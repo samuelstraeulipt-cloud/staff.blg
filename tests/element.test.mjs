@@ -356,6 +356,15 @@ const chrome = await page.evaluate(() => {
 ok('header hidden while TeamHub is on screen', chrome.hidden, chrome);
 ok('header back when the element leaves', chrome.back, chrome);
 ok('hidden again on return, one style tag', chrome.again && chrome.tags === 1, chrome);
+const gap = await page.evaluate(() => {
+  const el = document.querySelector('blg-teamhub-month'), parent = el.parentNode;
+  const box = document.createElement('div'); box.id = 'comp-test1'; box.style.marginTop = '58px';
+  parent.removeChild(el); box.appendChild(el); parent.appendChild(box);
+  const top = getComputedStyle(box).marginTop;
+  box.removeChild(el); parent.appendChild(el); box.remove();
+  return top;
+});
+ok('no white strip above the TeamHub bar', gap === '0px', gap);
 
 console.log('\n— errors —');
 ok('no page errors at all', errs.length === 0, errs.slice(0, 4));
