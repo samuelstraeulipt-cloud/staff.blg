@@ -341,6 +341,22 @@ await page.waitForTimeout(60);
 snText = await page.evaluate(() => document.querySelector('blg-teamhub-month').shadowRoot.textContent);
 ok('other admins do not see the card', !/Update in SportsNow/.test(snText));
 
+console.log('\n— site header/footer —');
+const chrome = await page.evaluate(() => {
+  const h = document.createElement('div'); h.id = 'SITE_HEADER'; document.body.appendChild(h);
+  const hidden = getComputedStyle(h).display === 'none';
+  const el = document.querySelector('blg-teamhub-month'), parent = el.parentNode;
+  parent.removeChild(el);
+  const back = getComputedStyle(h).display !== 'none';
+  parent.appendChild(el);
+  const again = getComputedStyle(h).display === 'none';
+  h.remove();
+  return { hidden, back, again, tags: document.querySelectorAll('#blg-teamhub-chrome').length };
+});
+ok('header hidden while TeamHub is on screen', chrome.hidden, chrome);
+ok('header back when the element leaves', chrome.back, chrome);
+ok('hidden again on return, one style tag', chrome.again && chrome.tags === 1, chrome);
+
 console.log('\n— errors —');
 ok('no page errors at all', errs.length === 0, errs.slice(0, 4));
 

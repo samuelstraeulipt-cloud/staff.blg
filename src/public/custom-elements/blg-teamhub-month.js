@@ -534,13 +534,34 @@
 
     connectedCallback() {
       this._loadFonts();
+      this._hideSiteChrome(true);
       this.shadowRoot.addEventListener('click', this._onClick);
       this.shadowRoot.addEventListener('change', this._onChange);
       this.shadowRoot.addEventListener('submit', this._onSubmit);
       this._render();
     }
 
+    /* The studio header and footer belong to the public site, not to
+       TeamHub. Wix cannot collapse them from page code ($w Header/Footer
+       have no collapse()), so the element hides them with a style tag in the
+       page document while it is on screen. Wix is a single-page app, so the
+       tag is removed again when the element leaves (navigating to any other
+       page brings the header and footer back). */
+    _hideSiteChrome(on) {
+      try {
+        const doc = this.ownerDocument;
+        const old = doc.getElementById('blg-teamhub-chrome');
+        if (!on) { if (old) old.remove(); return; }
+        if (old) return;
+        const st = doc.createElement('style');
+        st.id = 'blg-teamhub-chrome';
+        st.textContent = '#SITE_HEADER,#SITE_FOOTER,#SITE_HEADER-placeholder{display:none !important}';
+        (doc.head || doc.documentElement).appendChild(st);
+      } catch (e) { /* no page document to touch */ }
+    }
+
     disconnectedCallback() {
+      this._hideSiteChrome(false);
       this.shadowRoot.removeEventListener('click', this._onClick);
       this.shadowRoot.removeEventListener('change', this._onChange);
       this.shadowRoot.removeEventListener('submit', this._onSubmit);
