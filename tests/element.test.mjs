@@ -322,6 +322,25 @@ const monthText = await page.evaluate(() => document.querySelector('blg-teamhub-
 ok('a covered class names its coverer', /Bea L\./.test(monthText), monthText.slice(0, 0));
 ok('a waiting class shows the request count', /2/.test(monthText));
 
+console.log('\n— admin: SportsNow to-dos for the keeper —');
+const sndone = [];
+await page.exposeFunction('noteSn', e => sndone.push(e));
+await page.evaluate(() => document.querySelector('blg-teamhub-month')
+  .addEventListener('teamhub:sndone', e => window.noteSn(e.detail)));
+await set(Object.assign({}, ADMIN, { sportsnow: [{ taskId: 'k1', name: 'HYROX', date: '2027-03-02',
+  time: '18:00', fromName: 'Anna Meier', toName: 'Bea Lang', urgent: true }] }), 'ready', '');
+await page.waitForTimeout(60);
+let snText = await page.evaluate(() => document.querySelector('blg-teamhub-month').shadowRoot.textContent);
+ok('the keeper sees the to-do', /Update in SportsNow/.test(snText) && /Bea L\./.test(snText), snText.slice(0, 200));
+await page.evaluate(() => document.querySelector('blg-teamhub-month').shadowRoot
+  .querySelector('[data-sndone]').click());
+await page.waitForTimeout(30);
+ok('Done sends the task id', sndone.length === 1 && sndone[0].taskId === 'k1', sndone);
+await set(ADMIN, 'ready', '');
+await page.waitForTimeout(60);
+snText = await page.evaluate(() => document.querySelector('blg-teamhub-month').shadowRoot.textContent);
+ok('other admins do not see the card', !/Update in SportsNow/.test(snText));
+
 console.log('\n— errors —');
 ok('no page errors at all', errs.length === 0, errs.slice(0, 4));
 

@@ -24,6 +24,7 @@ import {
   getMyMonth, recordAbsences, undoAbsence, logHours,
   getOpenBoard, requestCover, withdrawRequest,
   getAdminQueue, assignCover, declineRequest, unassignCover, cancelHandover,
+  markSportsNowDone,
   getFrontDesk, setShiftStaff,
   getWeek, getTeamAbsences
 } from 'backend/teamhub.web';
@@ -47,7 +48,17 @@ const LOADERS = {
   team:      () => getTeamAbsences(ym)
 };
 
+/* The studio header and footer (links, newsletter form) mean nothing to staff,
+   so this page hides them. Only this page's code runs this: every other page
+   of blgsports.ch keeps both. Missing ids are ignored, never fatal. */
+function hideSiteChrome() {
+  ['#header1', '#footer1'].forEach(id => {
+    try { const x = $w(id); if (x && x.collapse) x.collapse(); } catch (e) { /* not on this site */ }
+  });
+}
+
 $w.onReady(async function () {
+  hideSiteChrome();
   el = $w(ELEMENT_ID);
 
   /* --------------------------------------------------------- getting in */
@@ -119,6 +130,8 @@ $w.onReady(async function () {
   el.on('teamhub:unassign', (event) => act(
     () => unassignCover(event.detail.sessionId),
     'Cover changed — the session is open for someone else.'));
+  el.on('teamhub:sndone',   (event) => act(
+    () => markSportsNowDone(event.detail.taskId), 'Marked as updated in SportsNow.'));
 
   /* The wording depends on what was actually undone, so the backend says. */
   el.on('teamhub:cancel', (event) => act(

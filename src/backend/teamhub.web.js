@@ -653,6 +653,46 @@ function requireAdmin(staff) {
   return staff;
 }
 
+/* ------------------------------------------------------ SportsNow to-dos
+   SportsNow cannot be written to from outside, so whoever keeps it in step
+   (Chris, via the `sportsnow` role) gets a to-do whenever TeamHub changes who
+   actually teaches a class on a date. One row per class and date, keyed
+   `class:<refId>:<date>`:
+     snId     — who SportsNow shows (assumed: the planned coach, until done)
+     targetId — who it should show now
+   When the two agree there is nothing to do and the row closes itself — so
+   assigning cover and then cancelling it before anyone got to SportsNow
+   leaves no stale to-do behind. Shifts are not in SportsNow and never count. */
+const isSnKeeper = s => list(s.roles).includes('sportsnow');
+
+async function syncSportsNow(session, targetId) {
+  if (!session || session.kind !== 'class') return;
+  const key = `class:${session.refId}:${session.date}`;
+  const found = await wixData.query('SportsNowTasks').eq('title', key).limit(1).find(OPT);
+  const t = found.items[0];
+  if (!t) {
+    if (targetId === session.ownerId) return;
+    await wixData.insert('SportsNowTasks', { title: key, refId: session.refId,
+      date: session.date, snId: session.ownerId, targetId, status: 'open' }, OPT);
+    return;
+  }
+  t.targetId = targetId;
+  t.status = t.snId === targetId ? 'done' : 'open';
+  await wixData.update('SportsNowTasks', t, OPT);
+}
+
+export const markSportsNowDone = webMethod(Permissions.SiteMember, async (taskId) => {
+  const staff = await requireStaff();
+  if (!isSnKeeper(staff)) throw new Error('NOT_ADMIN');
+  if (typeof taskId !== 'string') throw new Error('BAD_INPUT');
+  const t = await wixData.get('SportsNowTasks', taskId, OPT);
+  if (!t) throw new Error('NOT_FOUND');
+  t.snId = t.targetId;
+  t.status = 'done';
+  await wixData.update('SportsNowTasks', t, OPT);
+  return { ok: true };
+});
+
 export const getAdminQueue = webMethod(Permissions.SiteMember, async (ym) => {
   const staff = requireAdmin(await requireStaff());
   if (!isYm(ym)) ym = todayISO().slice(0, 7);
@@ -710,7 +750,26 @@ export const getAdminQueue = webMethod(Permissions.SiteMember, async (ym) => {
   const byWhen = (a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time);
   queue.sort(byWhen); noAsk.sort(byWhen); coveredList.sort(byWhen);
 
-  return { me: pub(staff), view: 'admin', ym, today, queue, noAsk, covered: coveredList,
+  /* Open SportsNow to-dos, from today on, whatever month is showing: they are
+     the keeper's list, not a monthly report. */
+  let sportsnow = null;
+  if (isSnKeeper(staff)) {
+    const tRes = await findAll(wixData.query('SportsNowTasks').eq('status', 'open'), 300);
+    const [Y, M, D] = today.split('-').map(Number);
+    const t1 = new Date(Date.UTC(Y, M - 1, D + 1));
+    const tomorrow = `${t1.getUTCFullYear()}-${pad(t1.getUTCMonth() + 1)}-${pad(t1.getUTCDate())}`;
+    sportsnow = tRes.items
+      .filter(t => t.date >= today && classOf[t.refId])
+      .map(t => {
+        const row = classOf[t.refId];
+        return { taskId: t._id, name: row.title || '', date: t.date, time: row.start || '',
+          fromName: nameOfRow(plan.byId[t.snId]), toName: nameOfRow(plan.byId[t.targetId]),
+          urgent: t.date <= tomorrow };
+      })
+      .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
+  }
+
+  return { me: pub(staff), view: 'admin', ym, today, queue, noAsk, covered: coveredList, sportsnow,
     counts: {
       uncovered: seRes.items.filter(s => s.status === 'open').length,
       handed: seRes.items.length
@@ -733,6 +792,7 @@ export const assignCover = webMethod(Permissions.SiteMember, async (requestId) =
   s.status = 'covered';
   s.coveredById = r.staffId;
   await wixData.update('Sessions', s, OPT);
+  await syncSportsNow(s, r.staffId);
 
   r.status = 'approved';
   await wixData.update('CoverRequests', r, OPT);
@@ -774,6 +834,9 @@ export const unassignCover = webMethod(Permissions.SiteMember, async (sessionId)
   s.status = 'open';
   s.coveredById = null;
   await wixData.update('Sessions', s, OPT);
+  /* Open again, nobody on it yet: SportsNow should show the planned coach
+     until a new cover is assigned. */
+  await syncSportsNow(s, s.ownerId);
   const reqs = await wixData.query('CoverRequests')
     .eq('sessionId', sessionId).limit(100).find(OPT);
   await Promise.all(reqs.items
@@ -805,6 +868,7 @@ export const cancelHandover = webMethod(Permissions.SiteMember, async (sessionId
     .eq('sessionId', sessionId).limit(100).find(OPT);
   await Promise.all(reqs.items.map(r => wixData.remove('CoverRequests', r._id, OPT)));
   await wixData.remove('Sessions', sessionId, OPT);
+  await syncSportsNow(s, s.ownerId);
 
   return { ok: true, wasCovered: s.status === 'covered' };
 });

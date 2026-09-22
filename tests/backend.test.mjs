@@ -24,7 +24,7 @@ function world() {
   const staff = seed('Staff', [
     { _id: 'anna', title: 'Anna Meier',  email: 'anna@blg.ch',  roles: 'coach,frontdesk', disciplines: 'group,more', colour: '#112233' },
     { _id: 'bea',  title: 'Bea Lang',    email: 'bea@blg.ch',   roles: 'coach,frontdesk', disciplines: 'group',      colour: 'red;background:url(x)' },
-    { _id: 'cara', title: 'Cara Roth',   email: 'cara@blg.ch',  roles: 'admin',           disciplines: '',           colour: '#445566' },
+    { _id: 'cara', title: 'Cara Roth',   email: 'cara@blg.ch',  roles: 'admin,sportsnow',           disciplines: '',           colour: '#445566' },
     { _id: 'dan',  title: 'Dan Klein',   email: 'dan@blg.ch',   roles: 'coach',           disciplines: 'more',       colour: '#778899' }
   ]);
   seed('Classes', [
@@ -37,7 +37,7 @@ function world() {
     { title: 's1|' + D1, date: D1, shiftId: 's1', staffEmail: 'anna@blg.ch' },
     { title: 's1|' + D2, date: D2, shiftId: 's1', staffEmail: 'anna@blg.ch' }
   ]);
-  seed('Sessions', []); seed('CoverRequests', []); seed('ShiftOverrides', []);
+  seed('Sessions', []); seed('CoverRequests', []); seed('ShiftOverrides', []); seed('SportsNowTasks', []);
   return staff;
 }
 const as = who => setMember({ _id: 'm-' + who, loginEmail: who + '@blg.ch', loginEmailVerified: true });
@@ -339,6 +339,34 @@ ok('...and shows it in the week it does', JSON.stringify(wk).includes('HYROX Int
 await T.recordAbsences([{ kind: 'class', refId: 'c9', date: D1 }]);
 ok('an absence on a date it does not run records nothing',
   !db.Sessions.some(x => x.refId === 'c9'), db.Sessions);
+
+console.log('\n— SportsNow to-dos follow who actually teaches —');
+world(); as('anna');
+await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D1 }]);
+ok('a handover alone asks nothing of SportsNow', db.SportsNowTasks.length === 0, db.SportsNowTasks);
+let snSess = db.Sessions[0];
+as('bea'); await T.requestCover(snSess._id, 'want');
+as('cara'); await T.assignCover(db.CoverRequests[0]._id);
+let aq = await T.getAdminQueue(YM);
+ok('assigning cover opens a to-do for the keeper', (aq.sportsnow || []).length === 1, aq.sportsnow);
+ok('...naming both coaches', aq.sportsnow && aq.sportsnow[0].fromName === 'Anna Meier'
+  && aq.sportsnow[0].toName === 'Bea Lang', aq.sportsnow);
+await T.unassignCover(snSess._id);
+aq = await T.getAdminQueue(YM);
+ok('taking the cover back before SportsNow was touched closes it', (aq.sportsnow || []).length === 0, aq.sportsnow);
+await T.assignCover(db.CoverRequests[0]._id);
+aq = await T.getAdminQueue(YM);
+await T.markSportsNowDone(aq.sportsnow[0].taskId);
+aq = await T.getAdminQueue(YM);
+ok('done clears it', aq.sportsnow.length === 0, aq.sportsnow);
+await T.cancelHandover(snSess._id);
+aq = await T.getAdminQueue(YM);
+ok('cancelling after SportsNow was changed asks to change it back',
+  aq.sportsnow.length === 1 && aq.sportsnow[0].toName === 'Anna Meier', aq.sportsnow);
+db.Staff.find(p => p._id === 'cara').roles = 'admin';
+aq = await T.getAdminQueue(YM);
+ok('an admin without the sportsnow role does not get the list', aq.sportsnow === null, aq.sportsnow);
+await threw('...and cannot tick one off', () => T.markSportsNowDone(db.SportsNowTasks[0]._id), 'NOT_ADMIN');
 
 console.log('\n' + (fail ? 'FAILED ' + fail : 'all green') + '  (' + pass + ' passed)');
 process.exit(fail ? 1 : 0);

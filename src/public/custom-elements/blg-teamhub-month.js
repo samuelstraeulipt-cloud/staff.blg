@@ -35,6 +35,7 @@
          teamhub:decline   { requestId }                    admin
          teamhub:unassign  { sessionId }                    admin
          teamhub:cancel    { sessionId }                    admin — the handover is off
+         teamhub:sndone    { taskId }                       sportsnow role — updated in SportsNow
          teamhub:setshift  { shiftId, date, staffId }       admin, front desk
          teamhub:login     { email, password }              sign-in screen
          teamhub:access    { email }                        first time / forgot password
@@ -597,7 +598,7 @@
             '[data-pick],[data-clear],[data-record],[data-undo],[data-msg],' +
             '[data-closeshare],[data-copy],[data-copytable],[data-go],[data-req],' +
             '[data-withdraw],[data-assign],[data-decline],[data-unassign],' +
-            '[data-askcancel],[data-nocancel],[data-cancel],[data-authmode],[data-signout]')
+            '[data-askcancel],[data-nocancel],[data-cancel],[data-authmode],[data-signout],[data-sndone]')
         : null;
       if (!el) return;
 
@@ -621,6 +622,7 @@
       if (el.dataset.assign)   { this._emit('teamhub:assign',   { requestId: el.dataset.assign }); return; }
       if (el.dataset.decline)  { this._emit('teamhub:decline',  { requestId: el.dataset.decline }); return; }
       if (el.dataset.unassign) { this._emit('teamhub:unassign', { sessionId: el.dataset.unassign }); return; }
+      if (el.dataset.sndone)   { this._emit('teamhub:sndone',   { taskId: el.dataset.sndone }); return; }
 
       if (el.dataset.clear) { this._sel = {}; this._render(); return; }
 
@@ -1278,6 +1280,33 @@
         statTile(covered.length, 'Covered', 'var(--green-600)') +
         statTile(c.handed != null ? c.handed : '—', 'Handed over') +
         '</div>');
+
+      /* Only for whoever keeps SportsNow in step (the `sportsnow` role): every
+         class whose coach TeamHub changed, until it is changed there too. */
+      var sn = d.sportsnow;
+      if (sn) {
+        out.push('<div class="card" style="margin-bottom:16px"><div class="card-head">' +
+          '<h2 class="card-title">Update in SportsNow</h2>' +
+          '<span class="pill ' + (sn.length ? 'pill-warn' : 'pill-ok') + '">' + sn.length + '</span></div>');
+        if (sn.length) {
+          sn.forEach(function (t) {
+            out.push('<div class="row">' +
+              '<div class="dotcol" style="background:' + (t.urgent ? 'var(--danger)' : 'var(--warn)') + '"></div>' +
+              '<div class="row-main"><div class="row-t">' + esc(t.name) + ' — ' +
+                esc(shortName(t.fromName)) + ' → <b>' + esc(shortName(t.toName)) + '</b></div>' +
+              '<div class="row-s">' + esc(fmtShort(t.date)) + ' · ' + esc(t.time) +
+                (t.urgent ? ' · <span style="color:var(--danger)">today or tomorrow</span>' : '') + '</div></div>' +
+              '<div class="row-actions">' +
+              '<a class="btn btn-quiet btn-sm" target="_blank" rel="noopener" href="https://www.sportsnow.ch/go/blg-sports-club?locale=de&amp;date=' +
+                esc(t.date) + '">Open SportsNow</a>' +
+              '<button class="btn btn-primary btn-sm" data-sndone="' + esc(t.taskId) + '">Done</button>' +
+              '</div></div>');
+          });
+        } else {
+          out.push('<div class="empty">SportsNow is up to date.</div>');
+        }
+        out.push('</div>');
+      }
 
       out.push('<div class="card" style="margin-bottom:16px"><div class="card-head">' +
         '<h2 class="card-title">Waiting for you — ' + esc(monthName) + '</h2>' +
