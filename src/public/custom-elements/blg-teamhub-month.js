@@ -58,6 +58,9 @@
      link that goes into the group chat message. */
   var OPEN_BOARD_URL = 'https://team.blgsports.ch/open';
 
+  /* Front desk "Import from Excel" card — hidden until a better flow exists. */
+  var SHOW_PLAN_IMPORT = false;
+
   /* ------------------------------------------------------------- helpers */
 
   function esc(s) {
@@ -1527,7 +1530,10 @@
          an hours box, without rebuilding the table under their cursor. */
       out.push('<div class="stack"><div class="card" data-totalscard="1">' +
         this._totalsBody(d) + '</div>');
-      if (canEdit) out.push(this._planImport(d.planReport));
+      /* The paste-from-Excel card is switched off for now (Sam, 22 Sep): the
+         plan was imported once and a better way is to be found. The page code
+         and backend behind it stay, so it can come back by flipping this. */
+      if (canEdit && SHOW_PLAN_IMPORT) out.push(this._planImport(d.planReport));
 
       if (pattern.length) {
         out.push('<div class="card card-pad"><span class="label">The weekly pattern — ' +
