@@ -1141,7 +1141,7 @@ export const importShiftPlan = webMethod(Permissions.SiteMember, async (text, ap
   });
 
   const keys = Object.keys(wanted);
-  const existing = await findIn('ShiftAssignments', 'title', keys, 1200);
+  const existing = await findIn('ShiftAssignments', 'title', keys, 1000);
   const rowAt = {}; existing.items.forEach(r => { rowAt[r.title] = r; });
 
   const changes = [];

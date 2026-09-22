@@ -69,7 +69,8 @@ class Q {
   hasSome(f, vs) { this.fs.push(r => vs.includes(r[f])); return this; }
   startsWith(f, v) { this.fs.push(r => String(r[f] || '').startsWith(v)); return this; }
   ascending(f) { this._asc = f; return this; }
-  limit(n) { this._limit = n; return this; }
+  /* Wix refuses a limit above 1000 — the import once asked for 1200 and failed live. */
+  limit(n) { if (n > 1000) throw new Error('limit above 1000'); this._limit = n; return this; }
   async find() {
     CALLS++;
     let all = (db[this.name] || []).filter(r => this.fs.every(f => f(r)));
