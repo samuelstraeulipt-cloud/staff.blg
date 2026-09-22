@@ -366,6 +366,51 @@ const gap = await page.evaluate(() => {
 });
 ok('no white strip above the TeamHub bar', gap === '0px', gap);
 
+console.log('\n— front desk: import from Excel —');
+const planEv = [];
+await page.exposeFunction('notePlan', e => planEv.push(e));
+await page.evaluate(() => {
+  const el = document.querySelector('blg-teamhub-month');
+  el.addEventListener('teamhub:plancheck', e => window.notePlan({ k: 'check', ...e.detail }));
+  el.addEventListener('teamhub:planapply', e => window.notePlan({ k: 'apply', ...e.detail }));
+});
+await set(FD, 'ready', '');
+await page.waitForTimeout(40);
+const pasted = '02.03.2027\tDi\tFD-TUE\t16:00\t20:00\tBea';
+await page.evaluate(t => {
+  const sr = document.querySelector('blg-teamhub-month').shadowRoot;
+  const ta = sr.querySelector('[data-plantext]'); ta.value = t;
+  sr.querySelector('[data-plancheck]').click();
+}, pasted);
+await page.waitForTimeout(30);
+ok('Check sends the pasted text', planEv.length === 1 && planEv[0].k === 'check' && planEv[0].text === pasted, planEv);
+await set(Object.assign({}, FD, { planReport: { rowsRead: 1, past: 0, blank: 0, same: 0, errorCount: 0,
+  errors: [], warnings: [], changes: [{ date: '2027-03-02', shift: 'FD-TUE', from: 'Anna Meier', to: 'Bea Lang' }] } }), 'ready', '');
+await page.waitForTimeout(40);
+let plan = await page.evaluate(() => {
+  const sr = document.querySelector('blg-teamhub-month').shadowRoot;
+  return { text: sr.querySelector('[data-plantext]').value, card: sr.textContent,
+    apply: !!sr.querySelector('[data-planapply]') };
+});
+ok('the pasted text survives the redraw', plan.text === pasted, plan.text);
+ok('the change is listed', /Anna Meier → Bea Lang/.test(plan.card) && /Import 1 change/.test(plan.card));
+await page.evaluate(() => document.querySelector('blg-teamhub-month').shadowRoot
+  .querySelector('[data-planapply]').click());
+await page.waitForTimeout(30);
+ok('Import sends the text', planEv.length === 2 && planEv[1].k === 'apply' && planEv[1].text === pasted, planEv);
+await set(Object.assign({}, FD, { planReport: { rowsRead: 1, past: 0, blank: 0, same: 0, errorCount: 1,
+  errors: ['Row 1 (02.03.2027): "Zoe" is not on the front desk staff list'], warnings: [], changes: [] } }), 'ready', '');
+await page.waitForTimeout(40);
+plan = await page.evaluate(() => {
+  const sr = document.querySelector('blg-teamhub-month').shadowRoot;
+  return { card: sr.textContent, apply: !!sr.querySelector('[data-planapply]') };
+});
+ok('errors are shown and block the import', /Zoe/.test(plan.card) && !plan.apply);
+await set(Object.assign({}, FD, { canEdit: false }), 'ready', '');
+await page.waitForTimeout(40);
+ok('front desk staff do not get the import', await page.evaluate(() =>
+  !document.querySelector('blg-teamhub-month').shadowRoot.querySelector('[data-plantext]')));
+
 console.log('\n— errors —');
 ok('no page errors at all', errs.length === 0, errs.slice(0, 4));
 

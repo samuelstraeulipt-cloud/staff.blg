@@ -25,7 +25,7 @@ import {
   getOpenBoard, requestCover, withdrawRequest,
   getAdminQueue, assignCover, declineRequest, unassignCover, cancelHandover,
   markSportsNowDone,
-  getFrontDesk, setShiftStaff,
+  getFrontDesk, setShiftStaff, importShiftPlan,
   getWeek, getTeamAbsences
 } from 'backend/teamhub.web';
 
@@ -36,6 +36,7 @@ let view = 'month';   // which screen is on display
 let ym = null;        // the month it is showing, "YYYY-MM"
 let monday = null;    // the week the schedule is showing, "YYYY-MM-DD"
 let busy = false;     // one request at a time, so reloads never interleave
+let shown = null;     // the data the element is showing now
 
 /* Each screen is one call. The month screens share `ym`; the schedule has its
    own week, so switching tabs and back keeps you where you were. */
@@ -148,6 +149,30 @@ $w.onReady(async function () {
     () => setShiftStaff(event.detail.shiftId, event.detail.date, event.detail.staffId),
     'Shift updated.'));
 
+  /* Front desk plan from Excel: a check shows what would change without
+     writing; the import writes and reloads the month. */
+  el.on('teamhub:plancheck', async (event) => {
+    if (busy || !shown) return;
+    busy = true;
+    el.setAttribute('state', 'loading');
+    try {
+      const report = await importShiftPlan(event.detail.text, false);
+      shown = Object.assign({}, shown, { planReport: report });
+      el.setAttribute('data', JSON.stringify(shown));
+      el.setAttribute('message', '');
+      el.setAttribute('state', 'ready');
+    } catch (err) {
+      fail(err);
+    } finally {
+      busy = false;
+    }
+  });
+  el.on('teamhub:planapply', (event) => act(async () => {
+    const res = await importShiftPlan(event.detail.text, true);
+    const n = (res && res.changes && res.changes.length) || 0;
+    return 'Imported — ' + n + ' ' + (n === 1 ? 'shift' : 'shifts') + ' updated.';
+  }, null));
+
   let signedIn = false;
   try { signedIn = !!(await authentication.loggedIn()); } catch (e) { signedIn = false; }
   if (!signedIn) { showLogin(); return; }
@@ -211,6 +236,7 @@ async function load(note) {
     /* Remember where each screen left us, so the arrows keep their place. */
     if (data.ym) ym = data.ym;
     if (data.monday) monday = data.monday;
+    shown = data;
     el.setAttribute('data', JSON.stringify(data));
     el.setAttribute('state', 'ready');
     if (note) el.setAttribute('message', note);
@@ -261,6 +287,8 @@ function explain(err) {
   if (code.includes('ALREADY_COVERED')) return 'Someone has already been assigned to that session. Ask an admin to change the cover.';
   if (code.includes('NOT_YOURS')) return 'That session is not yours to change.';
   if (code.includes('BAD_HOURS')) return 'Hours have to be between 0 and 24.';
+  if (code.includes('IMPORT_HAS_ERRORS')) return 'The plan has rows TeamHub cannot read. Paste it again and press Check to see which.';
+  if (code.includes('TOO_MANY_ROWS')) return 'That is more than 1000 rows — paste the rest of the year only.';
   /* A visible error beats a screen that has quietly dropped rows: the numbers
      on it would look perfectly reasonable and be wrong. */
   if (code.includes('TRUNCATED')) return 'There is more here than this screen can load at once, so some rows are missing. Tell Sam before trusting the numbers.';

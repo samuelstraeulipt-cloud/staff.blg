@@ -37,6 +37,8 @@
          teamhub:cancel    { sessionId }                    admin — the handover is off
          teamhub:sndone    { taskId }                       sportsnow role — updated in SportsNow
          teamhub:setshift  { shiftId, date, staffId }       admin, front desk
+         teamhub:plancheck { text }                         admin — check a pasted Excel plan
+         teamhub:planapply { text }                         admin — import it
          teamhub:login     { email, password }              sign-in screen
          teamhub:access    { email }                        first time / forgot password
          teamhub:logout    {}                               top bar, or a blocked account
@@ -212,6 +214,12 @@
     '.card{background:var(--card);border:1px solid var(--line);',
     '  border-radius:var(--r-card);box-shadow:var(--shadow);overflow:hidden}',
     '.card-pad{padding:20px 22px}',
+    '.plan-ta{width:100%;box-sizing:border-box;min-height:110px;margin:10px 0;padding:10px 12px;' +
+      'border:1px solid var(--line);border-radius:10px;font:12px/1.5 ui-monospace,Menlo,monospace;' +
+      'resize:vertical;background:#fff;color:inherit}',
+    '.plan-list{max-height:220px;overflow:auto;margin:8px 0;font-size:12.5px}',
+    '.plan-list div{padding:4px 0;border-bottom:1px solid #F0F2F4}',
+    '.plan-err{color:#A3272B}',
     '.card-head{display:flex;align-items:center;justify-content:space-between;',
     '  gap:12px;padding:16px 22px;border-bottom:1px solid var(--line-2);flex-wrap:wrap}',
     '.card-title{font-family:var(--f-head);font-weight:600;font-size:15px;',
@@ -527,6 +535,7 @@
       this._confirm = null;      // sessionId whose cancel is one click from real
       this._authMode = null;     // 'login' | 'access' on the sign-in screen
       this._authEmail = '';      // kept across redraws; the password never is
+      this._planText = '';       // the pasted front desk plan, kept across redraws
       this._onClick = this._onClick.bind(this);
       this._onChange = this._onChange.bind(this);
       this._onSubmit = this._onSubmit.bind(this);
@@ -624,7 +633,8 @@
             '[data-pick],[data-clear],[data-record],[data-undo],[data-msg],' +
             '[data-closeshare],[data-copy],[data-copytable],[data-go],[data-req],' +
             '[data-withdraw],[data-assign],[data-decline],[data-unassign],' +
-            '[data-askcancel],[data-nocancel],[data-cancel],[data-authmode],[data-signout],[data-sndone]')
+            '[data-askcancel],[data-nocancel],[data-cancel],[data-authmode],[data-signout],[data-sndone],' +
+            '[data-plancheck],[data-planapply],[data-planclear]')
         : null;
       if (!el) return;
 
@@ -649,6 +659,22 @@
       if (el.dataset.decline)  { this._emit('teamhub:decline',  { requestId: el.dataset.decline }); return; }
       if (el.dataset.unassign) { this._emit('teamhub:unassign', { sessionId: el.dataset.unassign }); return; }
       if (el.dataset.sndone)   { this._emit('teamhub:sndone',   { taskId: el.dataset.sndone }); return; }
+      if (el.dataset.plancheck || el.dataset.planapply) {
+        var ta = this.shadowRoot.querySelector('[data-plantext]');
+        if (ta) this._planText = ta.value;
+        if (!this._planText.trim()) return;
+        if (el.dataset.plancheck) { this._emit('teamhub:plancheck', { text: this._planText }); return; }
+        var text = this._planText;
+        this._planText = '';                   // imported: the box starts empty again
+        this._emit('teamhub:planapply', { text: text });
+        return;
+      }
+      if (el.dataset.planclear) {
+        this._planText = '';
+        if (this._data) delete this._data.planReport;
+        this._render();
+        return;
+      }
 
       if (el.dataset.clear) { this._sel = {}; this._render(); return; }
 
@@ -748,6 +774,8 @@
 
     _onChange(ev) {
       var el = ev.target;
+
+      if (el.dataset && el.dataset.plantext !== undefined) { this._planText = el.value; return; }
 
       /* Front desk: an admin changing who is on a shift. */
       if (el.dataset && el.dataset.fd) {
@@ -1499,6 +1527,7 @@
          an hours box, without rebuilding the table under their cursor. */
       out.push('<div class="stack"><div class="card" data-totalscard="1">' +
         this._totalsBody(d) + '</div>');
+      if (canEdit) out.push(this._planImport(d.planReport));
 
       if (pattern.length) {
         out.push('<div class="card card-pad"><span class="label">The weekly pattern — ' +
@@ -1516,6 +1545,61 @@
         out.push('</div>');
       }
       out.push('</div></div>');
+      return out.join('');
+    }
+
+    /* Admin: paste rows from the Excel plan, check them, then import.
+       planReport (after a check) is
+       { rowsRead, past, blank, same, changes:[{date, shift, from, to}],
+         errors:[text], errorCount, warnings:[text] } */
+    _planImport(r) {
+      var out = ['<div class="card card-pad"><span class="label">Import from Excel</span>' +
+        '<div style="font-size:12.5px;color:var(--muted);margin-top:6px">In the ' +
+        'Schichtarbeitskalender, select the rows (Datum to Mitarbeiter 1), copy, paste here ' +
+        'and press Check. Only today onwards is changed; importing again only changes what ' +
+        'is different.</div>' +
+        '<textarea class="plan-ta" data-plantext="1" spellcheck="false" ' +
+        'placeholder="22.09.2026	Di	Di	17:00	19:30	Lynn">' + esc(this._planText) +
+        '</textarea>'];
+      if (!r) {
+        out.push('<button class="btn btn-primary btn-sm" data-plancheck="1">Check</button></div>');
+        return out.join('');
+      }
+      var changes = r.changes || [], errors = r.errors || [], warns = r.warnings || [];
+      out.push('<div style="font-size:13px;margin:4px 0"><strong>' + changes.length + '</strong> ' +
+        (changes.length === 1 ? 'shift' : 'shifts') + ' to change · ' + (r.same || 0) +
+        ' already right · ' + (r.past || 0) + ' in the past (left alone)' +
+        (r.blank ? ' · ' + r.blank + ' without a name (skipped)' : '') + '</div>');
+      if (errors.length) {
+        out.push('<div class="plan-list plan-err">' + errors.map(function (e) {
+          return '<div>' + esc(e) + '</div>'; }).join('') +
+          (r.errorCount > errors.length ? '<div>… and ' + (r.errorCount - errors.length) +
+            ' more</div>' : '') + '</div>');
+      }
+      if (warns.length) {
+        out.push('<div class="plan-list" style="color:#8A5A00">' + warns.map(function (e) {
+          return '<div>' + esc(e) + '</div>'; }).join('') + '</div>');
+      }
+      if (changes.length) {
+        out.push('<div class="plan-list">' + changes.map(function (c) {
+          return '<div><span style="font-variant-numeric:tabular-nums">' + esc(fmtShort(c.date)) +
+            '</span> · <strong>' + esc(c.shift) + '</strong> · ' +
+            (c.from ? esc(c.from) + ' → ' : '') + (c.to ? esc(c.to) : 'kein Frontdesk') +
+            '</div>'; }).join('') + '</div>');
+      }
+      out.push('<div style="display:flex;gap:8px;flex-wrap:wrap">');
+      if (errors.length) {
+        out.push('<span style="font-size:12.5px;color:#A3272B;align-self:center">Fix these in ' +
+          'the Excel (or leave the rows out) and check again.</span>');
+      } else if (changes.length) {
+        out.push('<button class="btn btn-primary btn-sm" data-planapply="1">Import ' +
+          changes.length + ' ' + (changes.length === 1 ? 'change' : 'changes') + '</button>');
+      } else {
+        out.push('<span style="font-size:12.5px;color:var(--muted);align-self:center">' +
+          'Nothing to change — TeamHub already matches.</span>');
+      }
+      out.push('<button class="btn btn-quiet btn-sm" data-plancheck="1">Check again</button>' +
+        '<button class="btn btn-quiet btn-sm" data-planclear="1">Clear</button></div></div>');
       return out.join('');
     }
 

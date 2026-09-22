@@ -368,5 +368,47 @@ aq = await T.getAdminQueue(YM);
 ok('an admin without the sportsnow role does not get the list', aq.sportsnow === null, aq.sportsnow);
 await threw('...and cannot tick one off', () => T.markSportsNowDone(db.SportsNowTasks[0]._id), 'NOT_ADMIN');
 
+console.log('\n— front desk plan import —');
+world(); as('anna');
+await threw('a non-admin importing', () => T.importShiftPlan('2027-03-02\tFD-TUE\tBea Lang', false), 'NOT_ADMIN');
+as('cara');
+const D3 = '2027-03-16';
+const excel = [
+  'Datum\tWochentag\tSchicht\tStart\tEnde\tMitarbeiter 1\tStunden-Override 1',
+  '02.03.2027\tDi\tFD-TUE\t16:00:00\t20:00:00\tBea\t',          // change Anna -> Bea (first name)
+  '09.03.2027\tDi\tFD-TUE\t16:00:00\t20:00:00\tAnna Meier\t',   // unchanged
+  '16.03.2027\tDi\tFD-TUE\t16:00:00\t20:00:00\tanna meier\t2',  // new
+  '23.03.2027\tDi\tFD-TUE\t16:00:00\t20:00:00\t\t',             // blank: skipped
+  '06.01.2026\tDi\tFD-TUE\t16:00:00\t20:00:00\tBea\t'           // past: skipped
+].join('\n');
+const planBefore = JSON.stringify(db.ShiftAssignments);
+let rep = await T.importShiftPlan(excel, false);
+ok('check reads the Excel rows', rep.rowsRead === 5, rep);
+ok('check lists only real changes', rep.changes.length === 2 &&
+  rep.changes[0].to === 'Bea Lang' && rep.changes[0].from === 'Anna Meier' &&
+  rep.changes[1].date === D3 && rep.changes[1].from === '', rep.changes);
+ok('check counts unchanged, blank and past', rep.same === 1 && rep.blank === 1 && rep.past === 1, rep);
+ok('check writes nothing', JSON.stringify(db.ShiftAssignments) === planBefore);
+rep = await T.importShiftPlan(excel, true);
+ok('import applies', rep.applied === true);
+ok('Bea now on the 2nd', db.ShiftAssignments.find(a => a.title === 's1|' + D1).staffEmail === 'bea@blg.ch');
+ok('the 16th added once', db.ShiftAssignments.filter(a => a.title === 's1|' + D3).length === 1);
+rep = await T.importShiftPlan(excel, true);
+ok('re-import changes nothing and duplicates nothing',
+  rep.changes.length === 0 && db.ShiftAssignments.length === 3, [rep.changes, db.ShiftAssignments.length]);
+rep = await T.importShiftPlan('09.03.2027\tDi\tFD-TUE\tkein Frontdesk', true);
+ok('"kein Frontdesk" empties the shift', db.ShiftAssignments.find(a => a.title === 's1|' + D2).staffEmail === '');
+rep = await T.importShiftPlan('02.03.2027\tDi\tFD-TUE\tZoe\n03.03.2027\tMi\tFD-TUE\tBea\n04.03.2027\tDo\tXX\tBea', false);
+ok('unknown name, wrong weekday and unknown code are reported', rep.errorCount === 3, rep.errors);
+await threw('importing with errors', () => T.importShiftPlan('02.03.2027\tDi\tFD-TUE\tZoe', true), 'IMPORT_HAS_ERRORS');
+
+world(); as('anna');
+await T.recordAbsences([{ kind: 'shift', refId: 's1', date: D1 }]);
+as('cara');
+await T.importShiftPlan('2027-03-02;FD-TUE;Bea Lang', true);
+const hs = db.Sessions.find(x => x.date === D1);
+ok('an import onto a handed-over shift settles the handover',
+  hs && hs.status === 'covered' && hs.coveredById === 'bea', hs);
+
 console.log('\n' + (fail ? 'FAILED ' + fail : 'all green') + '  (' + pass + ' passed)');
 process.exit(fail ? 1 : 0);

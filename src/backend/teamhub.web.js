@@ -1000,7 +1000,13 @@ export const setShiftStaff = webMethod(Permissions.SiteMember, async (shiftId, d
     await wixData.insert('ShiftAssignments', { title, date, shiftId, staffEmail: email }, OPT);
   }
   if (before === email) return { ok: true };
+  await settleShiftChange(shiftId, date, staffId, title);
+  return { ok: true };
+});
 
+/* Everything that has to follow a change of who works a shift — shared by
+   setting one shift by hand and by the plan import. */
+async function settleShiftChange(shiftId, date, staffId, title) {
   /* Naming somebody for a shift that had been handed over has to settle the
      handover as well. Writing only the rota left the two disagreeing: the board
      and the schedule still said "Needs cover", the open board still offered it
@@ -1035,7 +1041,150 @@ export const setShiftStaff = webMethod(Permissions.SiteMember, async (shiftId, d
   /* Hours logged against the person who was on it are not the new person's. */
   const ov = await wixData.query('ShiftOverrides').eq('title', title).limit(1).find(OPT);
   if (ov.items.length) await wixData.remove('ShiftOverrides', ov.items[0]._id, OPT);
-  return { ok: true };
+}
+
+/* ------------------------------------------------------ front desk import
+   The front desk plan is kept in Excel. An admin copies the rows (Datum,
+   Schicht, Mitarbeiter — more columns are fine) and pastes them here. Each
+   row names a date, one of the shift codes (Mo, Di, Mi MO, …) and a person.
+   Re-importing is safe: a shift is keyed by shift + date, so a row that has
+   not changed is left alone and a changed one is updated, never duplicated.
+   Only today onwards is touched — past shifts carry logged hours (payroll).
+   A blank person is skipped; "kein Frontdesk" empties the shift on purpose.
+   `apply` false only checks and reports; true writes. */
+const IMPORT_MAX = 1000;
+const NOBODY = /^(kein(e)?\s*frontdesk|keine?\s*besetzung|-)$/i;
+
+function parsePlanDate(v) {
+  const t = String(v || '').trim();
+  let m = t.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = t.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})$/);
+  if (!m) return null;
+  const Y = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+  const M = Number(m[2]), D = Number(m[1]);
+  const d = new Date(Date.UTC(Y, M - 1, D));
+  if (d.getUTCMonth() !== M - 1 || d.getUTCDate() !== D) return null;
+  return `${Y}-${pad(M)}-${pad(D)}`;
+}
+const codeKey = v => String(v || '').replace(/\./g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+export const importShiftPlan = webMethod(Permissions.SiteMember, async (text, apply) => {
+  requireAdmin(await requireStaff());
+  if (typeof text !== 'string' || text.length > 200000) throw new Error('BAD_INPUT');
+  const today = todayISO();
+  const plan = await loadPlan();
+
+  const shiftByCode = {};
+  plan.shifts.filter(s => !isOff(s.active)).forEach(s => { shiftByCode[codeKey(s.title)] = s; });
+
+  /* A name matches a Staff row by its full title, or by first name when only
+     one front desk person has it ("Lynn" for "Lynn Spira"). */
+  const fd = plan.staff.filter(p => list(p.roles).includes('frontdesk') && !isOff(p.active));
+  const byName = {}, firstCount = {};
+  fd.forEach(p => {
+    const t = String(p.title || '').trim().toLowerCase();
+    if (t) byName[t] = p;
+    const f = t.split(/\s+/)[0];
+    if (f) firstCount[f] = (firstCount[f] || 0) + 1;
+  });
+  fd.forEach(p => {
+    const f = String(p.title || '').trim().toLowerCase().split(/\s+/)[0];
+    if (f && firstCount[f] === 1 && !byName[f]) byName[f] = p;
+  });
+  const personOf = v => byName[String(v || '').trim().toLowerCase()] || null;
+
+  const wanted = {};            // "shiftId|date" -> { shift, date, person|null }
+  const errors = [], warnings = [];
+  let past = 0, blank = 0, rowsRead = 0;
+
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length > IMPORT_MAX) throw new Error('TOO_MANY_ROWS');
+  lines.forEach((line, i) => {
+    const cells = line.split(/\t|;/).map(c => c.trim());
+    let date = null, di = -1;
+    for (let k = 0; k < cells.length && !date; k++) {
+      date = parsePlanDate(cells[k]); if (date) di = k;
+    }
+    if (!date) return;                               // header or notes
+    rowsRead++;
+    let shift = null, si = -1;
+    for (let k = di + 1; k < cells.length && !shift; k++) {
+      shift = shiftByCode[codeKey(cells[k])] || null; if (shift) si = k;
+    }
+    const at = `Row ${i + 1} (${cells[di]})`;
+    if (!shift) { errors.push(`${at}: no known shift code`); return; }
+    if (Number(shift.weekday) !== weekdayOf(date)) {
+      errors.push(`${at}: ${shift.title} is not on that weekday`); return;
+    }
+    if (date < today) { past++; return; }
+
+    let person = null, nobody = false, unknown = '', extra = 0;
+    for (let k = si + 1; k < cells.length; k++) {
+      const c = cells[k];
+      if (!c || /^[\d:.,\s-]+$/.test(c) && !NOBODY.test(c)) continue;   // times, hours
+      if (shiftByCode[codeKey(c)] || /^(mo|di|mi|do|fr|sa|so)$/i.test(codeKey(c))) continue;
+      if (NOBODY.test(c)) { if (!person) nobody = true; continue; }
+      const p = personOf(c);
+      if (p) { if (!person && !nobody) person = p; else extra++; continue; }
+      if (!person && !nobody && !unknown) unknown = c;
+    }
+    if (!person && !nobody) {
+      if (unknown) errors.push(`${at}: "${unknown}" is not on the front desk staff list`);
+      else blank++;
+      return;
+    }
+    if (extra) warnings.push(`${at}: more than one person — only ${nameOfRow(person)} is taken`);
+    const key = `${shift._id}|${date}`;
+    if (wanted[key]) warnings.push(`${at}: ${shift.title} on ${date} appears twice — the last row counts`);
+    wanted[key] = { shift, date, person };
+  });
+
+  const keys = Object.keys(wanted);
+  const existing = await findIn('ShiftAssignments', 'title', keys, 1200);
+  const rowAt = {}; existing.items.forEach(r => { rowAt[r.title] = r; });
+
+  const changes = [];
+  let same = 0;
+  keys.sort((a, b) => wanted[a].date.localeCompare(wanted[b].date) ||
+    String(wanted[a].shift.start).localeCompare(String(wanted[b].shift.start)));
+  keys.forEach(key => {
+    const w = wanted[key];
+    const email = w.person ? mail(w.person.email) : '';
+    const row = rowAt[key];
+    const before = row ? mail(row.staffEmail) : '';
+    if (row && before === email) { same++; return; }
+    if (!row && !email) { same++; return; }
+    if (w.person && !email) {
+      errors.push(`${nameOfRow(w.person)} has no email in the staff list — ${w.shift.title} ${w.date} skipped`);
+      return;
+    }
+    changes.push({ key, w, row, before, email });
+  });
+
+  const report = {
+    ok: true, applied: false, rowsRead, past, blank, same,
+    changes: changes.map(c => ({
+      date: c.w.date, shift: c.w.shift.title || '',
+      from: c.before ? (nameOfRow(plan.byId[plan.idOfEmail[c.before]]) || c.before) : '',
+      to: c.w.person ? nameOfRow(c.w.person) : ''
+    })),
+    errors: errors.slice(0, 50), errorCount: errors.length,
+    warnings: warnings.slice(0, 50)
+  };
+  if (!apply) return report;
+  if (errors.length) throw new Error('IMPORT_HAS_ERRORS');
+
+  const fresh = changes.filter(c => !c.row).map(c => ({
+    title: c.key, date: c.w.date, shiftId: c.w.shift._id, staffEmail: c.email }));
+  if (fresh.length) await wixData.bulkInsert('ShiftAssignments', fresh, OPT);
+  for (const c of changes.filter(x => x.row)) {
+    c.row.staffEmail = c.email;
+    await wixData.update('ShiftAssignments', c.row, OPT);
+    await settleShiftChange(c.w.shift._id, c.w.date, c.w.person ? c.w.person._id : null, c.key);
+  }
+  report.applied = true;
+  return report;
 });
 
 /* --------------------------------------------------------------- schedule */
