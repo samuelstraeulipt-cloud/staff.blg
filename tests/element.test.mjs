@@ -418,6 +418,124 @@ ok('the class count is shown', /3 classes/.test(snv.text));
 ok('no change log on the schedule — it is the plan, not a diff',
   !/What changed/.test(snv.text) && !/Check now/.test(snv.text), snv.text.slice(0, 200));
 
+console.log('\n— on a phone —');
+await page.setViewportSize({ width: 390, height: 844 });
+await set(SCREENS.sportsnow, 'ready', '');
+await page.waitForTimeout(60);
+
+const vis = sel => page.evaluate(s => {
+  const el = document.querySelector('blg-teamhub-month').shadowRoot.querySelector(s);
+  return !!el && getComputedStyle(el).display !== 'none';
+}, sel);
+
+ok('the top tab row is gone', !(await vis('.nav')));
+ok('a bar takes its place along the bottom', await vis('.dock'));
+const dock = await page.evaluate(() => {
+  const sr = document.querySelector('blg-teamhub-month').shadowRoot;
+  return [...sr.querySelectorAll('.dock button')]
+    .map(b => (b.dataset.go || 'more') + ':' + b.textContent.trim()).join(',');
+});
+ok('the bar keeps the top bar\'s order, four then More',
+  dock === 'admin:Admin,month:My month,open:Open,sportsnow:Schedule,more:More', dock);
+ok('the open tab is marked in the bar', await page.evaluate(() =>
+  document.querySelector('blg-teamhub-month').shadowRoot
+    .querySelector('.dock button.on').dataset.go === 'sportsnow'));
+
+ok('More is shut until it is asked for', !(await page.evaluate(() =>
+  !!document.querySelector('blg-teamhub-month').shadowRoot.querySelector('.moremenu'))));
+await page.evaluate(() => document.querySelector('blg-teamhub-month').shadowRoot
+  .querySelector('[data-more]').click());
+await page.waitForTimeout(40);
+const more = await page.evaluate(() => [...document.querySelector('blg-teamhub-month')
+  .shadowRoot.querySelectorAll('.moremenu button')].map(b => b.dataset.go).join(','));
+ok('and holds the tabs that did not fit', more === 'team,frontdesk', more);
+
+ok('the seven-column week is not what a phone gets', !(await vis('.wide-only')));
+ok('the week comes as a list instead', await vis('.narrow-only'));
+const ag = await page.evaluate(() => {
+  const sr = document.querySelector('blg-teamhub-month').shadowRoot;
+  return { days: [...sr.querySelectorAll('.ag-day')].map(d => d.textContent.trim()),
+    rows: sr.querySelectorAll('.ag:not(.ag-none)').length,
+    rail: [...sr.querySelectorAll('.ag-rail')].map(r => r.getAttribute('style') || '') };
+});
+ok('today is the Monday here, so the whole week is still ahead',
+  ag.days.length === 7 && /Mon 1 Mar · today/.test(ag.days[0]), ag.days);
+ok('every class carries its coach\'s colour',
+  ag.rail.some(s => /#112233/.test(s)) && ag.rail.some(s => /#00E583/.test(s)), ag.rail);
+
+/* Mid-week, the days already gone are left off — nobody opens this on a
+   Wednesday to read about Monday. */
+const midweek = JSON.parse(JSON.stringify(SCREENS.sportsnow));
+midweek.days.forEach((d, i) => { d.isToday = i === 2; });
+await set(midweek, 'ready', '');
+await page.waitForTimeout(60);
+const ag2 = await page.evaluate(() => [...document.querySelector('blg-teamhub-month')
+  .shadowRoot.querySelectorAll('.ag-day')].map(d => d.textContent.trim()));
+ok('the list starts at today and drops the days that have been',
+  ag2.length === 5 && /Wed 3 Mar · today/.test(ag2[0]), ag2);
+
+await set(SCREENS.sportsnow, 'ready', '');
+await page.waitForTimeout(60);
+await page.evaluate(() => document.querySelector('blg-teamhub-month').shadowRoot
+  .querySelector('[data-snview="day"]').click());
+await page.waitForTimeout(40);
+ok('Day opens on today, with a strip of seven to move by', await page.evaluate(() => {
+  const sr = document.querySelector('blg-teamhub-month').shadowRoot;
+  return sr.querySelectorAll('.dchip').length === 7 &&
+    sr.querySelector('.dchip.on').dataset.snday === '0';
+}));
+ok('a day with nothing on it says so rather than showing a blank grid',
+  /Nothing on the plan this day/.test(await page.evaluate(() =>
+    document.querySelector('blg-teamhub-month').shadowRoot.textContent)));
+
+await page.evaluate(() => document.querySelector('blg-teamhub-month').shadowRoot
+  .querySelector('.dchip[data-snday="1"]').click());
+await page.waitForTimeout(40);
+const day = await page.evaluate(() => {
+  const sr = document.querySelector('blg-teamhub-month').shadowRoot;
+  return { evs: [...sr.querySelectorAll('.dev')].map(e => e.getAttribute('style') || ''),
+    names: [...sr.querySelectorAll('.dev .n')].map(e => e.textContent.trim()) };
+});
+ok('the picked day draws its classes',
+  day.names.join(',') === 'Group Strength,Pilates,Yoga Flow', day.names);
+ok('back-to-back classes each get the full width',
+  day.evs.every(s => /\/ 1\)/.test(s)), day.evs[0]);
+ok('each block is placed by its time', /top:\s*90px/.test(day.evs[0]), day.evs[0]);
+
+/* Three at 10:00 is the case that decides the layout — they share the
+   width rather than landing on top of one another. */
+const pile = JSON.parse(JSON.stringify(SCREENS.sportsnow));
+pile.days[1].items = [
+  { time: '10:00', end: '11:00', name: 'Community Run', who: 'Anna Meier', colour: '#112233' },
+  { time: '10:00', end: '10:55', name: 'Fullbody Strength', who: 'Bea Lang', colour: '#00E583' },
+  { time: '10:00', end: '10:55', name: 'HYROX Introduction', who: 'Bea Lang', colour: '#00E583' },
+  { time: '11:15', end: '12:10', name: 'HYROX Team Up', who: 'Anna Meier', colour: '#112233' }
+];
+await set(pile, 'ready', '');
+await page.waitForTimeout(60);
+await page.evaluate(() => {
+  const sr = document.querySelector('blg-teamhub-month').shadowRoot;
+  sr.querySelector('[data-snview="day"]').click();
+});
+await page.waitForTimeout(40);
+await page.evaluate(() => document.querySelector('blg-teamhub-month').shadowRoot
+  .querySelector('.dchip[data-snday="1"]').click());
+await page.waitForTimeout(40);
+const piled = await page.evaluate(() => [...document.querySelector('blg-teamhub-month')
+  .shadowRoot.querySelectorAll('.dev')].map(e => e.getAttribute('style') || ''));
+ok('the three at 10:00 take a third of the width each',
+  piled.filter(s => /\/ 3\)/.test(s)).length === 3, piled.slice(0, 1));
+ok('and sit side by side, not on top of each other',
+  piled[0].indexOf('* 0)') > 0 && piled.some(s => /\* 1\)/.test(s)) &&
+  piled.some(s => /\* 2\)/.test(s)), piled);
+ok('the one that starts later goes back to the full width',
+  piled.filter(s => /\/ 1\)/.test(s)).length === 1, piled);
+
+await page.setViewportSize({ width: 1200, height: 900 });
+await page.waitForTimeout(40);
+ok('the desktop keeps its seven columns and its top tabs',
+  (await vis('.wide-only')) && (await vis('.nav')) && !(await vis('.dock')));
+
 console.log('\n— errors —');
 ok('no page errors at all', errs.length === 0, errs.slice(0, 4));
 

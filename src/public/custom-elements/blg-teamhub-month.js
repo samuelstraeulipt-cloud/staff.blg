@@ -445,18 +445,94 @@
     '  .grid-2{grid-template-columns:1fr}',
     '  .stats{grid-template-columns:repeat(2,1fr)}',
     '}',
+    /* ------------------------------------------ phone: agenda and day grid
+       Seven columns never fit across a phone, so the week becomes a list and
+       a day-at-a-time time grid. Both are rendered; the media query below
+       decides which one the screen gets. */
+    '.narrow-only{display:none}',
+    '.agenda{padding:10px 14px 2px}',
+    '.ag-day{font-family:var(--f-head);font-weight:700;font-size:11px;letter-spacing:.1em;',
+    '  text-transform:uppercase;color:var(--muted);margin:16px 2px 8px}',
+    '.ag-day:first-child{margin-top:2px}',
+    '.ag{display:flex;gap:12px;align-items:stretch;background:var(--card);',
+    '  border:1px solid var(--line);border-radius:14px;padding:12px 13px;margin-bottom:8px}',
+    '.ag-none{color:var(--muted);font-size:13px}',
+    '.ag-t{flex:none;width:52px}',
+    '.ag-t b{display:block;font-family:var(--f-head);font-size:14px;font-weight:700}',
+    '.ag-t span{display:block;font-size:11.5px;color:var(--muted-2)}',
+    '.ag-rail{flex:none;width:4px;border-radius:2px}',
+    '.ag-m{min-width:0}',
+    '.ag-m b{display:block;font-family:var(--f-head);font-size:14px;font-weight:600;',
+    '  line-height:1.25}',
+    '.ag-m span{display:block;font-size:12.5px;color:var(--muted);margin-top:2px}',
+    '.snbar{display:flex;align-items:center;gap:10px;padding:12px 14px 0}',
+    '.vseg{display:flex;background:var(--line-2);border-radius:var(--r-pill);padding:3px;gap:2px}',
+    '.vseg button{background:none;border:0;padding:6px 14px;border-radius:var(--r-pill);',
+    '  font-size:12.5px;font-weight:600;color:var(--muted);cursor:pointer;font-family:inherit}',
+    '.vseg button.on{background:var(--card);color:var(--text);box-shadow:var(--shadow)}',
+    '.dstrip{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;padding:10px 10px 12px}',
+    '.dchip{background:none;border:0;display:flex;flex-direction:column;align-items:center;',
+    '  gap:5px;padding:3px 0;cursor:pointer;font-family:inherit}',
+    '.dchip .d{font-family:var(--f-head);font-weight:700;font-size:10px;letter-spacing:.08em;',
+    '  color:var(--muted-2)}',
+    '.dchip .n{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;',
+    '  font-family:var(--f-head);font-size:15px;font-weight:600;color:var(--text)}',
+    '.dchip .dot{width:4px;height:4px;border-radius:50%;background:var(--muted-2);opacity:.55}',
+    '.dchip.on .n{background:var(--black);color:#fff}',
+    '.dchip.today .n{box-shadow:inset 0 0 0 2px var(--green-600)}',
+    '.dchip.today.on .n{background:var(--green-600);color:#04150D;box-shadow:none}',
+    '.dgrid{position:relative;padding:8px 14px 24px 0;background:var(--paper)}',
+    '.dgrid .hl{position:absolute;left:56px;right:14px;border-top:1px solid var(--line)}',
+    '.dgrid .hl.half{border-top-style:dotted;opacity:.6}',
+    '.dgrid .hr{position:absolute;left:0;width:48px;text-align:right;font-size:11px;',
+    '  color:var(--muted-2);transform:translateY(-7px)}',
+    '.dev{position:absolute;border-radius:12px;padding:7px 9px;overflow:hidden;',
+    '  box-shadow:0 1px 2px rgba(11,11,12,.09);display:flex;flex-direction:column;gap:2px}',
+    '.dev .n{font-family:var(--f-head);font-size:12.5px;font-weight:600;line-height:1.2;',
+    '  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}',
+    '.dev .c{font-size:11px;opacity:.76;overflow:hidden;text-overflow:ellipsis;',
+    '  white-space:nowrap}',
+    '.dev.sm{padding:6px 8px;gap:1px}',
+    '.dev.sm .n{font-size:11px;line-height:1.25}',
+    '.dev.sm .c{font-size:10px}',
+
+    /* -------------------------------------------- phone: bar along the bottom
+       The tabs keep the order they have at the top; the first four ride in
+       the bar and the rest sit behind More. Sticky, not fixed, so a Wix
+       wrapper with a transform on it cannot strand the bar off screen. */
+    '.dock{display:none}',
+    '.dock button{background:none;border:0;display:flex;flex-direction:column;',
+    '  align-items:center;gap:3px;padding:5px 2px;color:#8C9298;font-size:10px;',
+    '  font-weight:600;font-family:inherit;cursor:pointer;position:relative}',
+    '.dock button.on{color:var(--green)}',
+    '.dock svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.7;',
+    '  stroke-linecap:round;stroke-linejoin:round}',
+    '.moremenu{position:absolute;right:8px;bottom:calc(100% + 8px);background:var(--card);',
+    '  border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);',
+    '  min-width:196px;padding:6px;z-index:60}',
+    '.moremenu button{display:block;width:100%;text-align:left;padding:12px 14px;',
+    '  font-size:14.5px;border:0;background:none;border-radius:10px;font-family:inherit;',
+    '  cursor:pointer;color:var(--text);flex-direction:row;gap:0}',
+    '.moremenu button.on{color:var(--green-600);font-weight:600}',
+
+    '@media (max-width:980px){',
+    '  .wkwrap{min-width:820px}',
+    '}',
     '@media (max-width:640px){',
-    '  .topbar-in{flex-wrap:wrap;padding:0 14px;gap:10px}',
+    '  .topbar-in{flex-wrap:nowrap;padding:0 14px;gap:10px}',
     '  .logo,.topbar-right{padding:12px 0}',
-    '  .nav{order:3;flex-basis:100%;gap:18px;border-top:1px solid rgba(255,255,255,.13)}',
-    '  .nav button{padding:11px 0}',
+    '  .nav{display:none}',
     '  .who-name,.who-role{display:none}',
-    '  .page{padding:20px 14px 48px}',
+    '  .page{padding:20px 14px 24px}',
     '  .page-title{font-size:22px}',
     '  .card-head,.row,.card-pad,.pick-row,.selbar,.note-line,.mbar{',
     '    padding-left:16px;padding-right:16px}',
     '  .actions .btn{flex:1}',
     '  .daychip{min-width:54px}',
+    '  .wide-only{display:none}',
+    '  .narrow-only{display:block}',
+    '  .dock{display:grid;position:sticky;bottom:0;z-index:40;background:var(--black);',
+    '    border-top:1px solid #1E2125;padding:6px 4px calc(8px + env(safe-area-inset-bottom,0px))}',
     '}'
   ].join('\n');
 
@@ -501,6 +577,179 @@
       '<span class="who-role">' + esc(roleLabel(me)) + '</span></span></div>' +
       '<button type="button" class="signout" data-signout="1">Sign out</button>' +
       '</div></div></header>';
+  }
+
+  /* -------------------------------------------------- the phone tab bar */
+
+  var DOCK_ICON = {
+    admin: '<path d="M20.5 11.2V6.3a1.8 1.8 0 0 0-1.2-1.7l-6.7-2.4a1.8 1.8 0 0 0-1.2 0' +
+      'L4.7 4.6a1.8 1.8 0 0 0-1.2 1.7v5c0 4.9 3.5 8.6 8.5 10.2"/><path d="m14 16.4 2.4 2.4 4.6-4.9"/>',
+    month: '<rect x="3" y="4.5" width="18" height="16" rx="3"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/>',
+    open:  '<path d="M9 11V4.8a1.6 1.6 0 1 1 3.2 0V11"/>' +
+      '<path d="M12.2 10.4V6.4a1.6 1.6 0 1 1 3.2 0v5"/>' +
+      '<path d="M15.4 11.2V8.6a1.6 1.6 0 1 1 3.2 0v6.2c0 3.4-2.4 6.2-6 6.2-2.6 0-4.3-1.2-5.5-3.3' +
+      'L5 13.4a1.6 1.6 0 0 1 2.7-1.7L9 13.6"/>',
+    sportsnow: '<rect x="3" y="4.5" width="18" height="16" rx="3"/>' +
+      '<path d="M3 9.5h18M8 2.5v4M16 2.5v4M7.5 13.5h4M7.5 17h8"/>',
+    schedule: '<rect x="3" y="4.5" width="18" height="16" rx="3"/><path d="M3 9.5h18"/>',
+    team:  '<circle cx="9" cy="8" r="3.2"/><path d="M2.6 20c1.2-3.2 3.7-4.8 6.4-4.8S14.2 16.8 15.4 20"/>' +
+      '<path d="M16.5 5.2a3.2 3.2 0 0 1 0 5.6M18 15.6c1.6.7 2.8 2.1 3.4 4.4"/>',
+    frontdesk: '<path d="M3 10.5h18M4.5 10.5V19M19.5 10.5V19M7.5 10.5V7a2.5 2.5 0 0 1 2.5-2.5h4' +
+      'A2.5 2.5 0 0 1 16.5 7v3.5"/>',
+    more:  '<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/>' +
+      '<circle cx="19" cy="12" r="1.4"/>'
+  };
+
+  /* Room for four labels across a phone, so the long ones get a short name. */
+  var DOCK_LABEL = { open: 'Open', team: 'Absences' };
+
+  function dockIcon(key) {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+      (DOCK_ICON[key] || DOCK_ICON.more) + '</svg>';
+  }
+
+  /* Same tabs, same order as the top bar — the first four in the bar, the
+     rest behind More. Hidden above 640px, where the top bar does the job. */
+  function dock(me, active, moreOpen) {
+    var shown = NAV.filter(function (n) { return n.show(me) && n.built; });
+    var bar = shown.slice(0, 4), rest = shown.slice(4);
+    var cols = bar.length + (rest.length ? 1 : 0);
+    var out = ['<nav class="dock" style="grid-template-columns:repeat(' + cols + ',1fr)">'];
+
+    bar.forEach(function (n) {
+      out.push('<button type="button" data-go="' + n.key + '"' +
+        (n.key === active ? ' class="on" aria-current="page"' : '') + '>' +
+        dockIcon(n.key) + '<span>' + esc(DOCK_LABEL[n.key] || n.label) + '</span></button>');
+    });
+
+    if (rest.length) {
+      var onRest = rest.some(function (n) { return n.key === active; });
+      out.push('<button type="button" data-more="1" aria-expanded="' + !!moreOpen + '"' +
+        (onRest ? ' class="on"' : '') + '>' +
+        dockIcon('more') + '<span>More</span></button>');
+      if (moreOpen) {
+        out.push('<div class="moremenu">' + rest.map(function (n) {
+          return '<button type="button" data-go="' + n.key + '"' +
+            (n.key === active ? ' class="on"' : '') + '>' + esc(n.label) + '</button>';
+        }).join('') + '</div>');
+      }
+    }
+
+    out.push('</nav>');
+    return out.join('');
+  }
+
+  /* ------------------------------------------- the week on a phone screen */
+
+  function hm(t) { return Number(String(t).slice(0, 2)) * 60 + Number(String(t).slice(3, 5)); }
+
+  /* Classes that overlap share the width, the way a calendar does it: the
+     ones that touch form a cluster, and each takes the first free lane. */
+  function snLanes(items) {
+    var ev = items.map(function (it, i) {
+      return { i: i, s: hm(it.time), e: Math.max(hm(it.end || it.time), hm(it.time) + 30), it: it };
+    }).sort(function (a, b) { return a.s - b.s || a.e - b.e; });
+
+    var cluster = [], end = -1, out = [];
+    function settle() {
+      var busy = [];
+      cluster.forEach(function (x) {
+        var k = 0;
+        while (busy[k] !== undefined && busy[k] > x.s) k++;
+        busy[k] = x.e; x.lane = k;
+      });
+      var n = busy.length;
+      cluster.forEach(function (x) { x.of = n; out.push(x); });
+      cluster = [];
+    }
+    ev.forEach(function (x) {
+      if (cluster.length && x.s >= end) settle();
+      cluster.push(x); end = Math.max(end, x.e);
+    });
+    if (cluster.length) settle();
+    return out;
+  }
+
+  function snAgenda(days) {
+    var out = ['<div class="agenda">'];
+    days.forEach(function (day) {
+      out.push('<div class="ag-day">' + esc(day.dow) + ' ' + esc(day.dayLabel) +
+        (day.isToday ? ' &middot; today' : '') + '</div>');
+      var items = (day.items || []).slice().sort(function (a, b) { return hm(a.time) - hm(b.time); });
+      if (!items.length) out.push('<div class="ag ag-none">Nothing on the plan.</div>');
+      items.forEach(function (it) {
+        out.push('<div class="ag">' +
+          '<div class="ag-t"><b>' + esc(it.time) + '</b><span>' + esc(it.end || '') + '</span></div>' +
+          '<div class="ag-rail" style="background:' + esc(it.colour || '#EDEFF2') + '"></div>' +
+          '<div class="ag-m"><b>' + esc(it.name) + '</b><span>' +
+          esc(it.who || 'no coach') + '</span></div></div>');
+      });
+    });
+    out.push('</div>');
+    return out.join('');
+  }
+
+  function snStrip(days, sel) {
+    return '<div class="dstrip">' + days.map(function (day, i) {
+      return '<button type="button" class="dchip' + (i === sel ? ' on' : '') +
+        (day.isToday ? ' today' : '') + '" data-snday="' + i + '">' +
+        '<span class="d">' + esc(String(day.dow).slice(0, 1)) + '</span>' +
+        '<span class="n">' + esc(String(day.dayLabel).split(' ')[0]) + '</span>' +
+        '<span class="dot"' + ((day.items || []).length ? '' : ' style="opacity:0"') + '></span>' +
+        '</button>';
+    }).join('') + '</div>';
+  }
+
+  var SN_HOUR = 76;
+
+  function snDayGrid(day) {
+    var items = day && day.items ? day.items : [];
+    var from = 7, to = 21;
+    if (items.length) {
+      var lo = 24, hi = 0;
+      items.forEach(function (it) {
+        lo = Math.min(lo, Math.floor(hm(it.time) / 60));
+        hi = Math.max(hi, Math.ceil(hm(it.end || it.time) / 60));
+      });
+      from = Math.max(0, lo - 1); to = Math.min(24, hi + 1);
+    }
+    if (to - from < 4) to = Math.min(24, from + 4);
+
+    var out = ['<div class="dgrid" style="height:' +
+      ((to - from) * SN_HOUR + 34) + 'px">'];
+
+    for (var h = from; h <= to; h++) {
+      var y = (h - from) * SN_HOUR + 14;
+      out.push('<div class="hl" style="top:' + y + 'px"></div>');
+      out.push('<div class="hr" style="top:' + y + 'px">' +
+        (h < 10 ? '0' : '') + h + ':00</div>');
+      if (h < to) out.push('<div class="hl half" style="top:' + (y + SN_HOUR / 2) + 'px"></div>');
+    }
+
+    if (!items.length) {
+      out.push('<div class="empty" style="position:absolute;top:70px;left:56px;right:14px">' +
+        'Nothing on the plan this day.</div>');
+    }
+
+    snLanes(items).forEach(function (x) {
+      var bg = x.it.colour || '#EDEFF2';
+      var top = (x.s - from * 60) / 60 * SN_HOUR + 14;
+      var height = Math.max((x.e - x.s) / 60 * SN_HOUR - 4, 40);
+      var gap = 4;
+      var w = 'calc((100% - 70px - ' + (gap * (x.of - 1)) + 'px) / ' + x.of + ')';
+      var left = 'calc(56px + (' + w + ' + ' + gap + 'px) * ' + x.lane + ')';
+      var tight = x.of > 2 || height < 58;
+      out.push('<div class="dev' + (tight ? ' sm' : '') + '" style="top:' + top +
+        'px;height:' + height + 'px;left:' + left + ';width:' + w + ';background:' + esc(bg) +
+        ';color:' + ink(bg) + '">' +
+        '<span class="n">' + esc(x.it.name) + '</span>' +
+        '<span class="c">' + esc(x.it.time) +
+        (tight ? '' : ' &ndash; ' + esc(x.it.end || '') + ' &middot; ' + esc(x.it.who || 'no coach')) +
+        '</span></div>');
+    });
+
+    out.push('</div>');
+    return out.join('');
   }
 
   function monthBar(ym, legend) {
@@ -604,6 +853,7 @@
         try {
           this._data = JSON.parse(newV);
           this._sel = {};        // a fresh month starts unticked
+          this._snDay = null;    // and a fresh week starts on its own today
           this._confirm = null;  // and no half-pressed buttons
           this._authMode = null; // the page decides which sign-in screen comes next
         } catch (e) {
@@ -644,7 +894,8 @@
             '[data-closeshare],[data-copy],[data-copytable],[data-go],[data-req],' +
             '[data-withdraw],[data-assign],[data-decline],[data-unassign],' +
             '[data-askcancel],[data-nocancel],[data-cancel],[data-authmode],[data-signout],[data-sndone],' +
-            '[data-plancheck],[data-planapply],[data-planclear],[data-sncheck]')
+            '[data-plancheck],[data-planapply],[data-planclear],[data-sncheck],' +
+            '[data-more],[data-snview],[data-snday]')
         : null;
       if (!el) return;
 
@@ -658,7 +909,16 @@
       }
       if (el.dataset.week) { this._emit('teamhub:week', { monday: el.dataset.week }); return; }
       if (el.dataset.thisweek) { this._emit('teamhub:week', { monday: '' }); return; }
-      if (el.dataset.go) { this._share = null; this._sel = {}; this._emit('teamhub:view', { view: el.dataset.go }); return; }
+      if (el.dataset.go) {
+        this._share = null; this._sel = {}; this._more = false;
+        this._emit('teamhub:view', { view: el.dataset.go });
+        return;
+      }
+
+      /* Three switches the screen answers on its own — no round trip. */
+      if (el.dataset.more)   { this._more = !this._more; this._render(); return; }
+      if (el.dataset.snview) { this._snView = el.dataset.snview; this._render(); return; }
+      if (el.dataset.snday)  { this._snDay = Number(el.dataset.snday); this._render(); return; }
 
       if (el.dataset.req) {
         this._emit('teamhub:request', { sessionId: el.dataset.req, kind: el.dataset.kind });
@@ -927,7 +1187,6 @@
           '<i style="width:38%"></i><i style="width:92%"></i><i style="width:88%"></i>' +
           '<i style="width:94%"></i><i style="width:70%"></i></div></div></div>';
       } else {
-        var view = d.view || 'month';       // no view = the original month payload
         var render = {
           month:     this._month,
           open:      this._open,
@@ -936,13 +1195,15 @@
           schedule:  this._schedule,
           sportsnow: this._sportsnow,
           team:      this._team
-        }[view] || this._month;
+        }[d.view || 'month'] || this._month;
         body = render.call(this, d, message, state);
       }
 
-      var chrome = (d && d.me) ? topbar(d.me, (d.view || 'month')) : '';
+      var view = (d && d.view) || 'month';
+      var chrome = (d && d.me) ? topbar(d.me, view) : '';
+      var bar = (d && d.me) ? dock(d.me, view, this._more) : '';
       this.shadowRoot.innerHTML =
-        '<style>' + CSS + '</style><div class="app">' + chrome + body + '</div>';
+        '<style>' + CSS + '</style><div class="app">' + chrome + body + bar + '</div>';
     }
 
     /* A banner above the page, shared by every view. The slot is always
@@ -1755,7 +2016,7 @@
           : '<span style="color:var(--muted)">Nobody on the plan this week</span>') +
         '</div><span class="pill pill-neutral">' + (d.classes || 0) + ' ' +
         ((d.classes === 1) ? 'class' : 'classes') + '</span>' +
-        '</div><div class="scroller"><div class="wkwrap"><div class="wk">');
+        '</div><div class="wide-only"><div class="scroller"><div class="wkwrap"><div class="wk">');
 
       days.forEach(function (day) {
         out.push('<div class="wk-col"><div class="wk-head"' +
@@ -1777,10 +2038,42 @@
         out.push('</div></div>');
       });
 
-      out.push('</div></div></div>');
+      out.push('</div></div></div></div>');        // wk, wkwrap, scroller, wide-only
+      out.push(this._snNarrow(days));
       out.push('<div class="note-line">Straight from SportsNow, every time this screen is ' +
         'opened — cancellations and coach changes included. Handovers and cover still run ' +
         'on TeamHub\'s own class plan.</div></div></div>');
+      return out.join('');
+    }
+
+    /* A phone gets the same week without the seven columns: the days from
+       today on as a list, which is what opens, and a day-at-a-time time grid
+       behind a toggle. Both switches are answered here, not by the backend. */
+    _snNarrow(days) {
+      var view = this._snView === 'day' ? 'day' : 'agenda';
+      var today = -1;
+      days.forEach(function (x, i) { if (x.isToday) today = i; });
+
+      var sel = this._snDay;
+      if (sel == null || !days[sel]) sel = today < 0 ? 0 : today;
+
+      var out = ['<div class="narrow-only"><div class="snbar"><div class="vseg">',
+        '<button type="button" data-snview="agenda"' +
+          (view === 'agenda' ? ' class="on"' : '') + '>Agenda</button>',
+        '<button type="button" data-snview="day"' +
+          (view === 'day' ? ' class="on"' : '') + '>Day</button>',
+        '</div></div>'];
+
+      if (view === 'agenda') {
+        /* The week runs Monday to Sunday, but nobody opens this to read about
+           Monday on a Thursday — the days already gone are left off. */
+        out.push(snAgenda(today > 0 ? days.slice(today) : days));
+      } else {
+        out.push(snStrip(days, sel));
+        out.push(snDayGrid(days[sel]));
+      }
+
+      out.push('</div>');
       return out.join('');
     }
 
