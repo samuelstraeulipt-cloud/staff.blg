@@ -538,22 +538,57 @@ ok('the class count moves in beside the Agenda / Day switch',
     document.querySelector('blg-teamhub-month').shadowRoot
       .querySelector('.snbar').textContent)));
 
-/* The shift table cannot be six columns wide on a phone. */
+/* The shift table cannot be six columns wide on a phone: it becomes a list. */
 await set(FD, 'ready', '');
 await page.waitForTimeout(60);
-const tbl = await page.evaluate(() => {
+ok('the table is not what a phone gets', !(await vis('.wide-only')));
+const fd = await page.evaluate(() => {
   const sr = document.querySelector('blg-teamhub-month').shadowRoot;
-  const t = sr.querySelector('.tbl'), sc = sr.querySelector('.scroller');
-  return { display: getComputedStyle(t).display,
-    head: getComputedStyle(sr.querySelector('.tbl thead')).display,
-    wider: t.getBoundingClientRect().width > sc.getBoundingClientRect().width + 1,
-    labels: [...sr.querySelectorAll('.tbl tbody tr:first-child td')]
-      .map(td => td.dataset.l || '-').join(',') };
+  const row = sr.querySelector('.fdrow');
+  return { rows: sr.querySelectorAll('.fdrow').length,
+    weeks: [...sr.querySelectorAll('.wkh')].map(w => w.textContent.trim()),
+    first: row.textContent.replace(/\s+/g, ' ').trim(),
+    month: sr.querySelector('.fdtot .big').textContent.trim(),
+    people: [...sr.querySelectorAll('.fdtot .t')].map(t => t.textContent.trim()),
+    open: !!sr.querySelector('.fdx') };
 });
-ok('it stacks instead of scrolling sideways',
-  tbl.display === 'block' && tbl.head === 'none' && !tbl.wider, tbl);
-ok('and every cell carries the name its column had',
-  tbl.labels === '-,Shift,Time,Who,Hours,Status', tbl.labels);
+ok('one line per shift', fd.rows === 2, fd.rows);
+ok('the line says day, weekday, start, who and hours',
+  /^2Tue16:00Anna Meier4\.00 h$/.test(fd.first), fd.first);
+ok('the weeks are grouped and carry their own total',
+  fd.weeks.length === 2 && /^2–2 Mar4\.00 h$/.test(fd.weeks[0]), fd.weeks);
+ok('the month total and who worked it sit on top',
+  fd.month === '8.00 h' && fd.people[0] === 'Anna M. 8.00 h', [fd.month, fd.people]);
+ok('nothing is open until a line is tapped', !fd.open);
+
+await page.evaluate(() => document.querySelector('blg-teamhub-month').shadowRoot
+  .querySelector('.fdrow').click());
+await page.waitForTimeout(50);
+const panel = await page.evaluate(() => {
+  const sr = document.querySelector('blg-teamhub-month').shadowRoot;
+  const x = sr.querySelector('.fdx');
+  return x ? { text: x.textContent.replace(/\s+/g, ' ').trim(),
+    who: !!x.querySelector('select[data-fd]'), hrs: !!x.querySelector('input[data-ov]') } : null;
+});
+ok('tapping it opens the shift, with the picker and the hours box',
+  panel && panel.who && panel.hrs && /FD-TUE · Tuesday eve/.test(panel.text) &&
+  /16:00–20:00/.test(panel.text), panel);
+await page.evaluate(() => document.querySelector('blg-teamhub-month').shadowRoot
+  .querySelector('.fdrow').click());
+await page.waitForTimeout(50);
+ok('and tapping it again shuts it', !(await page.evaluate(() =>
+  !!document.querySelector('blg-teamhub-month').shadowRoot.querySelector('.fdx'))));
+
+/* An iPhone takes the home-screen tile and the name from the page. */
+const home = await page.evaluate(() => {
+  const l = document.querySelector('link[rel="apple-touch-icon"]');
+  const t = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+  return { png: !!l && /^data:image\/png;base64,iVBORw0K/.test(l.href),
+    size: l && l.getAttribute('sizes'), title: t && t.content,
+    once: document.querySelectorAll('link[rel="apple-touch-icon"]').length };
+});
+ok('the page carries a home-screen icon and a name',
+  home.png && home.size === '180x180' && home.title === 'TeamHub' && home.once === 1, home);
 
 /* A half-empty screen must not leave the bar floating in the middle. */
 await set({ view: 'open', me: ME, today: '2027-03-01', mine: [], covered: [] }, 'ready', '');

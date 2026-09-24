@@ -162,6 +162,11 @@
     return d === 1 ? 'yesterday' : d + ' days ago';
   }
 
+  /* The home-screen tile, built from teamhub-icon-180.png beside this file:
+     180x180, BLG TEAMHUB on the brand green. iOS rounds the corners itself,
+     so the square is drawn full-bleed. */
+  var ICON180 = 'iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAIAAACyr5FlAAAWfmNhQlgAABZ+anVtYgAAAB5qdW1kYzJwYQARABCAAACqADibcQNjMnBhAAAAFlhqdW1iAAAAR2p1bWRjMm1hABEAEIAAAKoAOJtxA3VybjpjMnBhOjYwMmMzZDYxLWFmMzUtNGMyNi1iN2Y0LTlmNTRlMmZiOGNmYwAAAAOTanVtYgAAAClqdW1kYzJhcwARABCAAACqADibcQNjMnBhLmFzc2VydGlvbnMAAAAAuGp1bWIAAABEanVtZGNib3IAEQAQgAAAqgA4m3ETYzJwYS5pbmdyZWRpZW50LnYzAAAAABhjMnNow9+bFr6YmdH/CLh0OD1oAAAAAGxjYm9yo2lkYzpmb3JtYXRpaW1hZ2UvcG5namluc3RhbmNlSUR4LHhtcDppaWQ6ODRlYzNiZGMtNjZkOS00ZDY0LTkwNGItNzQzNWQ3ZDViOTEwbHJlbGF0aW9uc2hpcGhwYXJlbnRPZgAAAeJqdW1iAAAAQWp1bWRjYm9yABEAEIAAAKoAOJtxE2MycGEuYWN0aW9ucy52MgAAAAAYYzJzaD/sdAlKqND6CbG51vjlo04AAAGZY2JvcqJnYWN0aW9uc4KiZmFjdGlvbmtjMnBhLm9wZW5lZGpwYXJhbWV0ZXJzoWtpbmdyZWRpZW50c4GiY3VybHgtc2VsZiNqdW1iZj1jMnBhLmFzc2VydGlvbnMvYzJwYS5pbmdyZWRpZW50LnYzZGhhc2hYIMMr2hIpZCcYp+3HQEdp8eUUlsHnn5J+Cw/vhTya2eISpGZhY3Rpb254HWNvbS5hbnRocm9waWMuY2xhdWRlLnByb3ZpZGVkanBhcmFtZXRlcnOheB9jb20uYW50aHJvcGljLm9yaWdpbi1jb25maWRlbmNlZ3Vua25vd25rZGVzY3JpcHRpb254ZkNsYXVkZSBwcm92aWRlZCB0aGlzIGZpbGUgYXQgdGhlIHJlcXVlc3Qgb2YgYSB1c2VyIGFuZCBtYXkgaGF2ZSBjcmVhdGVkIG9yIG1vZGlmaWVkIHRoZSBmaWxlIGNvbnRlbnRzLm1zb2Z0d2FyZUFnZW50oWRuYW1lZkNsYXVkZXJhbGxBY3Rpb25zSW5jbHVkZWT1AAAAyGp1bWIAAABAanVtZGNib3IAEQAQgAAAqgA4m3ETYzJwYS5oYXNoLmRhdGEAAAAAGGMyc2h2YGhqitTVo/EfNGlbTmlgAAAAgGNib3KlY2FsZ2ZzaGEyNTZjcGFkTQAAAAAAAAAAAAAAAABkaGFzaFgge0YHxfpwFwoA5moNhOUWIlYdqeXQ5I8xi6KXe9ow8/ZkbmFtZW5qdW1iZiBtYW5pZmVzdGpleGNsdXNpb25zgaJlc3RhcnQYIWZsZW5ndGgZFooAAAI+anVtYgAAACdqdW1kYzJjbAARABCAAACqADibcQNjMnBhLmNsYWltLnYyAAAAAg9jYm9ypWNhbGdmc2hhMjU2aXNpZ25hdHVyZXhNc2VsZiNqdW1iZj0vYzJwYS91cm46YzJwYTo2MDJjM2Q2MS1hZjM1LTRjMjYtYjdmNC05ZjU0ZTJmYjhjZmMvYzJwYS5zaWduYXR1cmVqaW5zdGFuY2VJRHgseG1wOmlpZDo4ZDI2NzQ1Ni05ZDRmLTQyZmEtYWMzMC1kZTFiYWU0ZmI5NTRyY3JlYXRlZF9hc3NlcnRpb25zg6JjdXJseC1zZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmluZ3JlZGllbnQudjNkaGFzaFggwyvaEilkJxin7cdAR2nx5RSWweefkn4LD++FPJrZ4hKiY3VybHgqc2VsZiNqdW1iZj1jMnBhLmFzc2VydGlvbnMvYzJwYS5hY3Rpb25zLnYyZGhhc2hYIMESYDHJB3GkvlB/17912mVh8Bo0y76KKD9mFE70uKF8omN1cmx4KXNlbGYjanVtYmY9YzJwYS5hc3NlcnRpb25zL2MycGEuaGFzaC5kYXRhZGhhc2hYILgvX8heAO0ugIF73APNQP4Ut/11J5/Qk2rAyR3xEGxAdGNsYWltX2dlbmVyYXRvcl9pbmZvo2RuYW1lb0FudGhyb3BpYyBGaWxlc2d2ZXJzaW9uZTEuMC4wa3NwZWNWZXJzaW9uZTIuNC4wAAAQOGp1bWIAAAAoanVtZGMyY3MAEQAQgAAAqgA4m3EDYzJwYS5zaWduYXR1cmUAAAAQCGNib3LShFkCEqIBJhghWQIKMIICBjCCAY2gAwIBAgIUQOWgCu7COdC+uIP6BkIFPWdVEwAwCgYIKoZIzj0EAwMwSTEXMBUGA1UEChMOQW50aHJvcGljLCBQQkMxLjAsBgNVBAMTJUFudGhyb3BpYyBDb250ZW50IENyZWRlbnRpYWxzIFJvb3QgQ0EwHhcNMjYwODA3MTg0MzU2WhcNMjgwODA2MTk0MzU2WjBEMRcwFQYDVQQKEw5BbnRocm9waWMsIFBCQzEpMCcGA1UEAxMgQW50aHJvcGljIENsYXVkZSBDb250ZW50IFNpZ25pbmcwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAASYegpry1AYBRTVNL1CpTlbROnY3dey+UrsF9C3phYrATN3ZHf93Mo8RQN0KOUuOn19P4oWNFWe5n2/She9N7eTo1gwVjAOBgNVHQ8BAf8EBAMCB4AwFQYDVR0lBA4wDAYKKwYBBAGD6F4CATAMBgNVHRMBAf8EAjAAMB8GA1UdIwQYMBaAFM5R4gSBTmRbI/jjxM+aPpzB11zCMAoGCCqGSM49BAMDA2cAMGQCMDFzHRSeAXrSy1WOzkbhPZ6Km2wGTmZ/2gK18k8BQGXyqz88Rdrz6CTX9flAnYNVxgIwcF9c3fVhqmJKpi+UhasNUMko69cyX6STPfta3Q8EjyzDjzoyrol46FP6VFHhvUcJoWNwYWRZDZ4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA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';
+
   /* ----------------------------------------------------- the design system */
 
   var CSS = [
@@ -465,6 +470,56 @@
     '.ag-m b{display:block;font-family:var(--f-head);font-size:14px;font-weight:600;',
     '  line-height:1.25}',
     '.ag-m span{display:block;font-size:12.5px;color:var(--muted);margin-top:2px}',
+    /* --------------------------------- phone: the shift plan as a list
+       Thirty-one shifts a month: one line each, grouped by week, with the
+       picker and the hours box behind a tap. */
+    '.fdtot{display:flex;gap:6px;flex-wrap:wrap;padding:12px 14px 2px;align-items:baseline}',
+    '.fdtot .big{font-family:var(--f-head);font-size:19px;font-weight:700;',
+    '  margin-right:auto;font-variant-numeric:tabular-nums}',
+    '.fdtot .t{background:var(--card);border:1px solid var(--line);border-radius:var(--r-pill);',
+    '  padding:5px 11px;font-size:12px;color:var(--muted);white-space:nowrap}',
+    '.fdtot .t b{font-weight:600;color:var(--text)}',
+    '.wkh{display:flex;align-items:baseline;gap:8px;padding:18px 16px 7px;',
+    '  font-family:var(--f-head);font-size:11px;font-weight:700;letter-spacing:.08em;',
+    '  text-transform:uppercase;color:var(--muted)}',
+    '.wkh i{margin-left:auto;font-style:normal;font-size:11.5px;letter-spacing:0;',
+    '  text-transform:none;color:var(--muted-2);font-variant-numeric:tabular-nums}',
+    '.fdlist{background:var(--card);border-top:1px solid var(--line);',
+    '  border-bottom:1px solid var(--line)}',
+    '.fdrow{display:flex;align-items:center;gap:11px;width:100%;padding:9px 14px;',
+    '  border:0;border-bottom:1px solid var(--line-2);border-left:3px solid transparent;',
+    '  text-align:left;background:none;cursor:pointer}',
+    '.fdrow.past{background:#FBFBFC;color:var(--muted)}',
+    '.fdrow.today{border-left-color:var(--green-600);background:#F4FDF9}',
+    '.fdrow.gap{border-left-color:var(--danger)}',
+    '.fdd{flex:none;width:30px;text-align:center}',
+    '.fdd b{display:block;font-family:var(--f-head);font-size:15px;font-weight:700;',
+    '  line-height:1;font-variant-numeric:tabular-nums}',
+    '.fdd span{display:block;font-size:9px;letter-spacing:.06em;text-transform:uppercase;',
+    '  color:var(--muted-2);margin-top:3px}',
+    '.fdt{flex:none;width:44px;font-size:12.5px;color:var(--muted);',
+    '  font-variant-numeric:tabular-nums}',
+    '.fdn{flex:1;min-width:0;font-size:14px;font-weight:500;overflow:hidden;',
+    '  text-overflow:ellipsis;white-space:nowrap}',
+    '.fdn.gap{color:#B4262A;font-weight:600}',
+    '.fdn small{display:block;font-size:11px;color:var(--muted-2);font-weight:400}',
+    '.fdh{flex:none;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;',
+    '  text-align:right;min-width:46px}',
+    '.fdh em{display:block;font-style:normal;font-size:9.5px;color:var(--green-600)}',
+    '.fdx{padding:12px 16px 16px;background:#FBFBFC;border-bottom:1px solid var(--line-2)}',
+    '.fdx dl{margin:0 0 12px;display:grid;grid-template-columns:76px 1fr;gap:6px 12px;',
+    '  font-size:13.5px}',
+    '.fdx dt{color:var(--muted);font-size:12px;padding-top:2px}',
+    '.fdx dd{margin:0}',
+    '.fdf{display:flex;gap:10px;align-items:center;margin-top:10px}',
+    '.fdf > span:first-child{font-size:12px;color:var(--muted);flex:none;width:46px}',
+    '.fdx select{flex:1;min-width:0;height:42px;font:inherit;font-size:14px;padding:0 10px;',
+    '  border:1px solid var(--line);border-radius:11px;background:var(--card);color:var(--text)}',
+    '.fdx input{width:84px;height:42px;font:inherit;font-size:14px;padding:0 10px;',
+    '  text-align:right;font-variant-numeric:tabular-nums;border:1px solid var(--line);',
+    '  border-radius:11px;background:var(--card);color:var(--text)}',
+    '.fdx input.on{border-color:var(--green-600);background:var(--green-tint)}',
+
     '.snbar{display:flex;align-items:center;gap:10px;padding:12px 14px 0}',
     '.snbar .pill{margin-left:auto}',
     '.vseg{display:flex;background:var(--line-2);border-radius:var(--r-pill);padding:3px;gap:2px}',
@@ -711,6 +766,20 @@
 
   function hm(t) { return Number(String(t).slice(0, 2)) * 60 + Number(String(t).slice(3, 5)); }
 
+  var DOW3 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  function utcOf(ds) {
+    var p = String(ds).split('-');
+    return Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+  }
+  function dayNum(ds) { return Number(String(ds).slice(8)); }
+  function dowOf(ds) { return DOW3[new Date(utcOf(ds)).getUTCDay()]; }
+  /* Which week a date belongs to, Monday first — the shift list groups by it. */
+  function weekKey(ds) {
+    var t = utcOf(ds);
+    var wd = (new Date(t).getUTCDay() + 6) % 7;
+    return new Date(t - wd * 86400000).toISOString().slice(0, 10);
+  }
+
   /* Classes that overlap share the width, the way a calendar does it: the
      ones that touch form a cluster, and each takes the first free lane. */
   function snLanes(items) {
@@ -870,6 +939,7 @@
 
     connectedCallback() {
       this._loadFonts();
+      this._appIcon();
       this._hideSiteChrome(true);
       this.shadowRoot.addEventListener('click', this._onClick);
       this.shadowRoot.addEventListener('change', this._onChange);
@@ -922,6 +992,7 @@
           this._data = JSON.parse(newV);
           this._sel = {};        // a fresh month starts unticked
           this._snDay = null;    // and a fresh week starts on its own today
+          this._fdOpen = null;   // and no shift is left hanging open
           this._confirm = null;  // and no half-pressed buttons
           this._authMode = null; // the page decides which sign-in screen comes next
         } catch (e) {
@@ -929,6 +1000,29 @@
         }
       }
       this._render();
+    }
+
+    /* Added to the home screen, an iPhone wants a square picture and a short
+       name, and takes both from the page it was added from. Without them the
+       tile is blank and the label is the domain. Injected here, so it applies
+       to the TeamHub page and to nothing else on the site. */
+    _appIcon() {
+      var id = 'blg-teamhub-icon';
+      if (document.getElementById(id)) return;
+      var head = document.head;
+      var link = document.createElement('link');
+      link.id = id;
+      link.rel = 'apple-touch-icon';
+      link.setAttribute('sizes', '180x180');
+      link.href = 'data:image/png;base64,' + ICON180;
+      head.appendChild(link);
+
+      [['apple-mobile-web-app-title', 'TeamHub'],
+       ['theme-color', '#000000']].forEach(function (m) {
+        var el = document.createElement('meta');
+        el.name = m[0]; el.content = m[1];
+        head.appendChild(el);
+      });
     }
 
     /* Poppins and Inter come from Google Fonts. If the network blocks them the
@@ -963,7 +1057,7 @@
             '[data-withdraw],[data-assign],[data-decline],[data-unassign],' +
             '[data-askcancel],[data-nocancel],[data-cancel],[data-authmode],[data-signout],[data-sndone],' +
             '[data-plancheck],[data-planapply],[data-planclear],[data-sncheck],' +
-            '[data-more],[data-snview],[data-snday]')
+            '[data-more],[data-snview],[data-snday],[data-fdrow]')
         : null;
       if (!el) return;
 
@@ -987,6 +1081,11 @@
       if (el.dataset.more)   { this._more = !this._more; this._render(); return; }
       if (el.dataset.snview) { this._snView = el.dataset.snview; this._render(); return; }
       if (el.dataset.snday)  { this._snDay = Number(el.dataset.snday); this._render(); return; }
+      if (el.dataset.fdrow) {
+        this._fdOpen = this._fdOpen === el.dataset.fdrow ? null : el.dataset.fdrow;
+        this._render();
+        return;
+      }
 
       if (el.dataset.req) {
         this._emit('teamhub:request', { sessionId: el.dataset.req, kind: el.dataset.kind });
@@ -1815,7 +1914,7 @@
         'Needs cover</span> <span><i style="background:var(--warn-tint);' +
         'border:1px solid var(--warn)"></i>Unstaffed</span>'));
 
-      out.push('<div class="scroller"><table class="tbl"><thead><tr>' +
+      out.push('<div class="wide-only"><div class="scroller"><table class="tbl"><thead><tr>' +
         '<th>Date</th><th>Shift</th><th>Time</th><th>Who</th>' +
         '<th style="text-align:right">Hours</th><th>Status</th></tr></thead><tbody>');
 
@@ -1859,7 +1958,8 @@
           '<td data-l="Status"><span class="pill pill-' + esc(tone) + '">' +
             esc((r.status && r.status.text) || '') + '</span></td></tr>');
       });
-      out.push('</tbody></table></div>');
+      out.push('</tbody></table></div></div>');
+      out.push(this._fdNarrow(d));
       out.push('<div class="note-line">Shifts that have already happened are marked ' +
         '<strong>Done</strong>. You can still type the real hours into any box — that is how ' +
         'a shift that ran long or short gets logged. It saves straight away, turns green, and ' +
@@ -1893,6 +1993,103 @@
       }
       out.push('</div></div>');
       return out.join('');
+    }
+
+    /* A month is thirty-one shifts, and six columns of them do not fit on a
+       phone. One line each instead — day, start, who, hours — grouped by week
+       so the eye has somewhere to land, with the picker and the hours box
+       behind a tap on the line. */
+    _fdNarrow(d) {
+      var rows = d.rows || [], self = this;
+      var out = ['<div class="narrow-only">'];
+      if (!rows.length) {
+        return out.join('') + '<div class="empty">No shifts in this month yet — ' +
+          'the rota is empty.</div></div>';
+      }
+
+      out.push('<div class="fdtot"><span class="big">' + hrs(d.monthHours || 0) + ' h</span>');
+      (d.totals || []).forEach(function (t) {
+        if (!t.n) return;                       // nobody with no shifts this month
+        out.push('<span class="t">' + esc(shortName(t.name)) + ' <b>' +
+          hrs(t.hours) + ' h</b></span>');
+      });
+      out.push('</div>');
+
+      var order = [], byWeek = {};
+      rows.forEach(function (r) {
+        var k = weekKey(r.date);
+        if (!byWeek[k]) { byWeek[k] = []; order.push(k); }
+        byWeek[k].push(r);
+      });
+
+      order.forEach(function (k) {
+        var g = byWeek[k];
+        var sum = g.reduce(function (a, r) { return a + Number(r.hours || 0); }, 0);
+        var last = g[g.length - 1].date;
+        out.push('<div class="wkh">' + dayNum(g[0].date) + '&ndash;' + dayNum(last) + ' ' +
+          esc(MONTHS[Number(last.slice(5, 7)) - 1].slice(0, 3)) +
+          '<i>' + hrs(sum) + ' h</i></div><div class="fdlist">');
+
+        g.forEach(function (r) {
+          var key = r.shiftId + '|' + r.date;
+          var gap = !r.staffId, today = r.date === d.today;
+          var changed = Number(r.hours) !== Number(r.plannedHours);
+          out.push('<button type="button" class="fdrow' +
+            (today ? ' today' : (r.past ? ' past' : '')) + (gap ? ' gap' : '') +
+            '" data-fdrow="' + esc(key) + '" aria-expanded="' +
+            (self._fdOpen === key) + '">' +
+            '<span class="fdd"><b>' + dayNum(r.date) + '</b><span>' +
+              esc(dowOf(r.date)) + '</span></span>' +
+            '<span class="fdt">' + esc(r.start) + '</span>' +
+            '<span class="fdn' + (gap ? ' gap' : '') + '">' +
+              (gap ? 'Needs someone' : esc(r.staffName)) +
+              (today ? '<small>today</small>' : '') + '</span>' +
+            '<span class="fdh">' + hrs(r.hours) + ' h' +
+              (changed ? '<em>plan ' + hrs(r.plannedHours) + '</em>' : '') +
+            '</span></button>');
+          if (self._fdOpen === key) out.push(self._fdPanel(d, r));
+        });
+        out.push('</div>');
+      });
+
+      out.push('</div>');
+      return out.join('');
+    }
+
+    /* What a tapped shift opens: the parts that do not fit on the line, and
+       the two things anybody would want to change. */
+    _fdPanel(d, r) {
+      var key = r.shiftId + '|' + r.date;
+      var gap = !r.staffId;
+      var changed = Number(r.hours) !== Number(r.plannedHours);
+
+      var who = d.canEdit
+        ? '<select data-fd="' + esc(key) + '">' +
+          '<option value=""' + (r.staffId ? '' : ' selected') + '>kein Frontdesk</option>' +
+          (d.staff || []).map(function (p) {
+            return '<option value="' + esc(p.id) + '"' +
+              (String(r.staffId) === String(p.id) ? ' selected' : '') + '>' +
+              esc(p.name) + '</option>';
+          }).join('') + '</select>'
+        : '<span style="font-size:14px">' +
+          (r.staffName ? esc(r.staffName) : 'kein Frontdesk') + '</span>';
+
+      var hoursBox = r.canLogHours
+        ? '<input type="number" step="0.25" min="0" max="24"' +
+          (changed ? ' class="on"' : '') + ' data-ov="' + esc(key) + '"' +
+          ' value="' + hrs(r.hours) + '" aria-label="Hours worked">'
+        : '<span style="font-size:14px">' + hrs(r.hours) + ' h</span>';
+
+      return '<div class="fdx">' +
+        '<dl><dt>Shift</dt><dd><strong>' + esc(r.code) + '</strong> · ' +
+          esc(r.label) + '</dd>' +
+        '<dt>Time</dt><dd>' + esc(r.start) + '–' + esc(r.end) + '</dd>' +
+        '<dt>Status</dt><dd>' + esc(gap ? 'Nobody on it'
+          : ((r.status && r.status.text) || '')) + '</dd></dl>' +
+        '<div class="fdf"><span>Who</span>' + who + '</div>' +
+        '<div class="fdf"><span>Hours</span>' + hoursBox +
+        '<span style="font-size:12.5px;color:var(--muted)">plan ' +
+        hrs(r.plannedHours) + ' h</span></div></div>';
     }
 
     /* Admin: paste rows from the Excel plan, check them, then import.
