@@ -579,7 +579,16 @@ await page.waitForTimeout(50);
 ok('and tapping it again shuts it', !(await page.evaluate(() =>
   !!document.querySelector('blg-teamhub-month').shadowRoot.querySelector('.fdx'))));
 
-/* An iPhone takes the home-screen tile and the name from the page. */
+/* An iPhone takes the home-screen tile and the name from the page. Wix puts
+   its own .ico there, which iOS cannot use, so that one has to go. */
+await page.evaluate(() => {
+  const l = document.createElement('link');
+  l.rel = 'apple-touch-icon';
+  l.href = 'https://static.parastorage.com/client/pfavico.ico';
+  document.head.appendChild(l);
+});
+await set(FD, 'ready', '');
+await page.waitForTimeout(60);
 const home = await page.evaluate(() => {
   const l = document.querySelector('link[rel="apple-touch-icon"]');
   const t = document.querySelector('meta[name="apple-mobile-web-app-title"]');
@@ -587,7 +596,7 @@ const home = await page.evaluate(() => {
     size: l && l.getAttribute('sizes'), title: t && t.content,
     once: document.querySelectorAll('link[rel="apple-touch-icon"]').length };
 });
-ok('the page carries a home-screen icon and a name',
+ok('the page carries one home-screen icon, and it is the PNG not the .ico',
   home.png && home.size === '180x180' && home.title === 'TeamHub' && home.once === 1, home);
 
 /* A half-empty screen must not leave the bar floating in the middle. */

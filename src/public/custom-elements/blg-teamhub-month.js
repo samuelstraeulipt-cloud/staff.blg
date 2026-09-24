@@ -1008,8 +1008,19 @@
        to the TeamHub page and to nothing else on the site. */
     _appIcon() {
       var id = 'blg-teamhub-icon';
-      if (document.getElementById(id)) return;
       var head = document.head;
+
+      /* Wix ships its own apple-touch-icon pointing at a .ico, and iOS cannot
+         make a home-screen tile out of one — that is why the tile came out
+         blank. Any that is not ours goes, every time, because Wix adds its
+         own back on some navigations. This is the TeamHub page only. */
+      [].slice.call(document.querySelectorAll('link[rel~="apple-touch-icon"]'))
+        .forEach(function (l) {
+          if (l.id !== id && l.parentNode) l.parentNode.removeChild(l);
+        });
+
+      if (document.getElementById(id)) return;
+
       var link = document.createElement('link');
       link.id = id;
       link.rel = 'apple-touch-icon';
@@ -1332,6 +1343,7 @@
     /* ------------------------------------------------------------ render */
 
     _render() {
+      this._appIcon();                    // Wix can put its .ico back; take it off again
       var state = this.getAttribute('state') || 'loading';
       var message = this.getAttribute('message') || '';
       var d = this._data;
