@@ -644,6 +644,41 @@ ok('and its shift table is still a table', await page.evaluate(() =>
   getComputedStyle(document.querySelector('blg-teamhub-month').shadowRoot
     .querySelector('.tbl')).display === 'table'));
 
+console.log('\n— a tapped tab answers at once —');
+await page.setViewportSize({ width: 390, height: 844 });
+await set(SCREENS.sportsnow, 'ready', '');
+await page.waitForTimeout(60);
+const tapped = await page.evaluate(() => {
+  const el = document.querySelector('blg-teamhub-month');
+  const sr = el.shadowRoot;
+  sr.querySelector('.dock [data-go="month"]').click();   // nothing answers it yet
+  return { lit: sr.querySelector('.dock button.on').dataset.go,
+    waiting: !!sr.querySelector('.skel'),
+    stillSchedule: !!sr.querySelector('.agenda') };
+});
+ok('the tab lights up before the answer arrives',
+  tapped.lit === 'month' && tapped.waiting && !tapped.stillSchedule, tapped);
+
+await set(SCREENS.month, 'ready', '');
+await page.waitForTimeout(60);
+ok('and the answer settles it', await page.evaluate(() => {
+  const sr = document.querySelector('blg-teamhub-month').shadowRoot;
+  return sr.querySelector('.dock button.on').dataset.go === 'month' && !sr.querySelector('.skel');
+}));
+
+/* A screen that fails must not leave the wrong tab lit for good. */
+await page.evaluate(() => document.querySelector('blg-teamhub-month').shadowRoot
+  .querySelector('.dock [data-go="open"]').click());
+await page.waitForTimeout(40);
+await set(SCREENS.month, 'error', 'Something went wrong.');
+await page.waitForTimeout(60);
+ok('a screen that fails hands the tab back', await page.evaluate(() =>
+  document.querySelector('blg-teamhub-month').shadowRoot
+    .querySelector('.dock button.on').dataset.go === 'month'));
+
+await page.setViewportSize({ width: 1200, height: 900 });
+await page.waitForTimeout(40);
+
 console.log('\n— errors —');
 ok('no page errors at all', errs.length === 0, errs.slice(0, 4));
 

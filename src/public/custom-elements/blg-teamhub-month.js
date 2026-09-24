@@ -1004,6 +1004,11 @@
           this._data = null;
         }
       }
+      /* Whatever came back — the screen, or the word that it failed —
+         settles which tab is really open. */
+      if (name === 'data' || (name === 'state' && newV !== 'loading')) {
+        this._pending = null;
+      }
       this._render();
     }
 
@@ -1089,6 +1094,10 @@
       if (el.dataset.thisweek) { this._emit('teamhub:week', { monday: '' }); return; }
       if (el.dataset.go) {
         this._share = null; this._sel = {}; this._more = false;
+        /* A screen costs a round trip. Light the tab and show the skeleton
+           now, so the tap answers immediately instead of a second later. */
+        this._pending = el.dataset.go;
+        this._render();
         this._emit('teamhub:view', { view: el.dataset.go });
         return;
       }
@@ -1366,6 +1375,11 @@
         body = '<div class="page"><div class="card"><div class="skel">' +
           '<i style="width:38%"></i><i style="width:92%"></i><i style="width:88%"></i>' +
           '<i style="width:94%"></i><i style="width:70%"></i></div></div></div>';
+      } else if (this._pending && this._pending !== (d.view || 'month')) {
+        /* On the way to another screen: its tab is already lit. */
+        body = '<div class="page"><div class="card"><div class="skel">' +
+          '<i style="width:38%"></i><i style="width:92%"></i><i style="width:88%"></i>' +
+          '<i style="width:94%"></i><i style="width:70%"></i></div></div></div>';
       } else {
         var render = {
           month:     this._month,
@@ -1379,7 +1393,7 @@
         body = render.call(this, d, message, state);
       }
 
-      var view = (d && d.view) || 'month';
+      var view = this._pending || (d && d.view) || 'month';
       var chrome = (d && d.me) ? topbar(d.me, view) : '';
       var bar = (d && d.me) ? dock(d.me, view, this._more) : '';
       this.shadowRoot.innerHTML =

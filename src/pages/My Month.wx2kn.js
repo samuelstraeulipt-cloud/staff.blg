@@ -38,6 +38,15 @@ let monday = null;    // the week the schedule is showing, "YYYY-MM-DD"
 let busy = false;     // one request at a time, so reloads never interleave
 let shown = null;     // the data the element is showing now
 
+/* A screen costs a round trip — about a second on a phone — and for that
+   second nothing on the page moved, which reads as a dead tab. The last
+   answer for each screen is kept, painted straight away when you come back
+   to it, and replaced when the fresh one lands. Any write empties this,
+   because a write can change screens other than the one in front of you. */
+const seen = new Map();
+let loadSeq = 0;
+const screenKey = () => view + '|' + (ym || '') + '|' + (monday || '');
+
 /* Each screen is one call. The month screens share `ym`; the schedule has its
    own week, so switching tabs and back keeps you where you were. */
 const LOADERS = {
@@ -237,23 +246,34 @@ function fail(err) {
 
 /* --------------------------------------------------------------- loading */
 async function load(note) {
-  if (busy) return;
+  const seq = ++loadSeq;          // a newer switch always wins
+  const hit = note ? null : seen.get(screenKey());
+  if (hit) {
+    shown = hit;
+    el.setAttribute('message', '');
+    el.setAttribute('data', JSON.stringify(hit));
+    el.setAttribute('state', 'ready');
+  } else {
+    el.setAttribute('state', 'loading');
+    if (!note) el.setAttribute('message', '');
+  }
+
   busy = true;
-  el.setAttribute('state', 'loading');
-  if (!note) el.setAttribute('message', '');
   try {
     const data = await (LOADERS[view] || LOADERS.month)();
+    if (seq !== loadSeq) return;                   // somebody moved on
     /* Remember where each screen left us, so the arrows keep their place. */
     if (data.ym) ym = data.ym;
     if (data.monday) monday = data.monday;
     shown = data;
+    seen.set(screenKey(), data);
     el.setAttribute('data', JSON.stringify(data));
     el.setAttribute('state', 'ready');
     if (note) el.setAttribute('message', note);
   } catch (err) {
-    fail(err);
+    if (seq === loadSeq) fail(err);
   } finally {
-    busy = false;
+    if (seq === loadSeq) busy = false;
   }
 }
 
@@ -268,6 +288,7 @@ async function act(run, note) {
        on what they found return the sentence themselves. */
     const said = await run();
     busy = false;
+    seen.clear();                 // a write can change more than this screen
     await load(typeof said === 'string' ? said : note);
   } catch (err) {
     busy = false;
