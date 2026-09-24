@@ -107,6 +107,24 @@ const wixData = {
   query: name => new Q(name),
   async get(name, rid) { CALLS++; const r = (db[name] || []).find(x => x._id === rid); return r ? { ...r } : null; },
   async insert(name, row) { CALLS++; const r = { _id: id(), _createdDate: new Date(), ...row }; (db[name] ||= []).push(r); return { ...r }; },
+  async bulkUpdate(name, rows) {
+    CALLS++;
+    rows.forEach(row => {
+      const i = (db[name] || []).findIndex(x => x._id === row._id);
+      if (i < 0) throw new Error('missing');
+      const kept = db[name][i];
+      db[name][i] = { _id: kept._id, _createdDate: kept._createdDate, ...row };
+    });
+    return { updated: rows.length, errors: [] };
+  },
+  async bulkRemove(name, ids) {
+    CALLS++;
+    ids.forEach(id => {
+      const i = (db[name] || []).findIndex(x => x._id === id);
+      if (i >= 0) db[name].splice(i, 1);
+    });
+    return { removed: ids.length, errors: [] };
+  },
   async bulkInsert(name, rows) {
     CALLS++;
     rows.forEach(row => (db[name] ||= []).push({ _id: id(), _createdDate: new Date(), ...row }));

@@ -85,7 +85,7 @@ export async function snWeek(monday) {
    Only lessons from today onwards are compared: the past cannot change in a
    way anybody can act on, and dragging it along would make every run
    re-examine the whole year. */
-const WEEKS_AHEAD = 6;
+const WEEKS_AHEAD = 4;
 
 export async function checkSportsNow(silent) {
   const now = new Date();
@@ -96,15 +96,18 @@ export async function checkSportsNow(silent) {
   const weeks = [];
   for (let i = 0; i < WEEKS_AHEAD; i++) weeks.push(addDays(from, i * 7));
 
+  /* The weeks go out together: a web method has seconds, not minutes, and
+     four round trips one after another used up the whole budget before a
+     single row was written. */
+  const fetched = await Promise.all(weeks.map(monday => snWeek(monday)));
+
   /* One row per lesson id. The weeks do not overlap, so this only matters
      when the feed repeats itself — but a lesson counted twice would be
      compared against itself and reported as a change that never happened. */
   const byId = {};
-  for (const monday of weeks) {
-    for (const l of await snWeek(monday)) {
-      if (l.snId && l.date >= today && l.date <= until) byId[l.snId] = l;
-    }
-  }
+  fetched.forEach(rows => rows.forEach(l => {
+    if (l.snId && l.date >= today && l.date <= until) byId[l.snId] = l;
+  }));
   const live = Object.keys(byId).map(id => byId[id])
     .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
 
@@ -120,12 +123,18 @@ export async function checkSportsNow(silent) {
   }
   const was = {}; res.items.forEach(r => { was[r.title] = r; });
 
+  /* The very first run has nothing to compare against. Reporting the whole
+     plan as "new" would be noise, and writing a change row per lesson would
+     take longer than a web method is allowed — so the first run only takes
+     the picture. */
+  const baseline = res.items.length === 0;
+
   const changes = [], fresh = [], updates = [], gone = [];
   live.forEach(l => {
     const old = was[l.snId];
     const row = { title: l.snId, date: l.date, time: l.time, name: l.name, coach: l.coach };
     if (!old) {
-      changes.push({ kind: 'added', lesson: l,
+      if (!baseline) changes.push({ kind: 'added', lesson: l,
         text: `New: ${l.name}, ${l.date} ${l.time}${l.coach ? ` — ${l.coach}` : ''}` });
       fresh.push(row);
       return;
@@ -155,22 +164,31 @@ export async function checkSportsNow(silent) {
   });
 
   if (!silent) {
-    const at = new Date();
-    for (const c of changes) {
-      /* Keyed by lesson, kind and day, so a job that runs twice in a day —
-         or a retry after a half-finished run — does not double the list. */
-      const title = `${c.lesson.snId || c.lesson.title}|${c.kind}|${today}`;
-      const found = await wixData.query('SnChanges').eq('title', title).limit(1).find(OPT);
-      const row = { title, kind: c.kind, text: c.text, date: c.lesson.date, at };
-      if (found.items.length) await wixData.update('SnChanges', Object.assign(found.items[0], row), OPT);
-      else await wixData.insert('SnChanges', row, OPT);
+    /* Keyed by lesson, kind and day, so a job that runs twice in a day — or a
+       retry after a half-finished run — does not double the list. The rows go
+       out in bulk: one row at a time cost a query and a write each, which is
+       what made the first live run time out. `at` is written as text because
+       that is the field's type; sorting still works, ISO sorts as dates do. */
+    const at = new Date().toISOString();
+    const rows = changes.map(c => ({
+      title: `${c.lesson.snId || c.lesson.title}|${c.kind}|${today}`,
+      kind: c.kind, text: c.text, date: c.lesson.date, at }));
+    if (rows.length) {
+      const seen = await wixData.query('SnChanges')
+        .hasSome('title', rows.map(r => r.title).slice(0, 100)).limit(1000).find(OPT);
+      const known = {}; seen.items.forEach(r => { known[r.title] = r._id; });
+      const add = rows.filter(r => !known[r.title]);
+      const edit = rows.filter(r => known[r.title])
+        .map(r => Object.assign({ _id: known[r.title] }, r));
+      if (add.length) await wixData.bulkInsert('SnChanges', add, OPT);
+      if (edit.length) await wixData.bulkUpdate('SnChanges', edit, OPT);
     }
     if (fresh.length) await wixData.bulkInsert('SnLessons', fresh, OPT);
-    for (const u of updates) await wixData.update('SnLessons', u, OPT);
-    for (const id of gone) await wixData.remove('SnLessons', id, OPT);
+    if (updates.length) await wixData.bulkUpdate('SnLessons', updates, OPT);
+    if (gone.length) await wixData.bulkRemove('SnLessons', gone, OPT);
   }
 
-  return { checked: live.length, from, until,
+  return { checked: live.length, from, until, baseline,
            added: changes.filter(c => c.kind === 'added').length,
            cancelled: changes.filter(c => c.kind === 'cancelled').length,
            coach: changes.filter(c => c.kind === 'coach').length,

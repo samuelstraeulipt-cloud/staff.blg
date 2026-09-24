@@ -472,22 +472,31 @@ const L = (id, date, time, name, team) => ({ name, date, time_begin: time, time_
 setFeed([L(1, soon(1), '18:00', 'Group Strength', 'Anna Meier'),
          L(2, soon(2), '19:00', 'Pilates', 'Bea Lang')]);
 let run = await T.checkSportsNowNow();
-ok('the first run asks SportsNow for six weeks', FETCH_CALLS.length === 6, FETCH_CALLS.length);
-ok('everything is new the first time', run.added === 2 && run.cancelled === 0, run);
+ok('the first run asks SportsNow for four weeks at once', FETCH_CALLS.length === 4, FETCH_CALLS.length);
+ok('the first run only takes the picture, it does not cry "new"',
+  run.baseline === true && run.changes.length === 0, run);
 ok('the plan is written down', db.SnLessons.length === 2, db.SnLessons);
-ok('and the changes are listed', db.SnChanges.length === 2 &&
-  /New: Group Strength/.test(db.SnChanges[0].text), db.SnChanges.map(c => c.text));
+ok('and nothing is reported yet', db.SnChanges.length === 0, db.SnChanges);
 
 run = await T.checkSportsNowNow();
 ok('a second run with nothing changed says nothing',
   run.added === 0 && run.cancelled === 0 && run.changes.length === 0, run);
-ok('and does not double the list', db.SnChanges.length === 2, db.SnChanges.length);
+ok('and writes nothing', db.SnChanges.length === 0, db.SnChanges.length);
 
-setFeed([L(1, soon(1), '18:00', 'Group Strength', 'Bea Lang')]);   // coach swap + one gone
+setFeed([L(1, soon(1), '18:00', 'Group Strength', 'Anna Meier'),
+         L(2, soon(2), '19:00', 'Pilates', 'Bea Lang'),
+         L(3, soon(2), '20:00', 'Yoga', 'Anna Meier')]);
+run = await T.checkSportsNowNow();
+ok('a lesson added later is reported', run.added === 1 && db.SnChanges.length === 1 &&
+  /New: Yoga/.test(db.SnChanges[0].text), db.SnChanges.map(c => c.text));
+ok('running it twice in a day does not double the list',
+  (await T.checkSportsNowNow(), db.SnChanges.length) === 1, db.SnChanges.length);
+
+setFeed([L(1, soon(1), '18:00', 'Group Strength', 'Bea Lang')]);   // coach swap + two gone
 run = await T.checkSportsNowNow();
 ok('a coach swap is noticed', run.coach === 1 &&
   /Anna Meier → Bea Lang/.test((run.changes.find(c => c.kind === 'coach') || {}).text || ''), run.changes);
-ok('a lesson that vanished counts as cancelled', run.cancelled === 1 &&
+ok('a lesson that vanished counts as cancelled', run.cancelled === 2 &&
   /Cancelled: Pilates/.test((run.changes.find(c => c.kind === 'cancelled') || {}).text || ''), run.changes);
 ok('the written-down plan follows', db.SnLessons.length === 1 &&
   db.SnLessons[0].coach === 'Bea Lang', db.SnLessons);
@@ -509,7 +518,9 @@ ok('the schedule still opens with no store behind it',
   (await T.getSportsNowWeek(soon(1))).changes.length === 0);
 await threw('but the check says what is missing', () => T.checkSportsNowNow(), 'SPORTSNOW_NO_STORE');
 seed('SnLessons', []); seed('SnChanges', []);
-await T.checkSportsNowNow();          // fill the store again for the checks below
+await T.checkSportsNowNow();          // baseline
+setFeed([L(1, soon(1), '18:00', 'Group Strength', 'Bea Lang')]);   // one real change
+await T.checkSportsNowNow();
 
 as('anna');
 await threw('a non-admin running the check', () => T.checkSportsNowNow(), 'NOT_ADMIN');
@@ -517,7 +528,8 @@ as('cara');
 const week = await T.getSportsNowWeek(soon(1));
 ok('the screen shows what the checks found, newest first',
   Array.isArray(week.changes) && week.changes.length > 0 &&
-  typeof week.changes[0].text === 'string', (week.changes || []).slice(0, 2));
+  typeof week.changes[0].text === 'string' && typeof week.changes[0].at === 'number',
+  (week.changes || []).slice(0, 2));
 
 console.log('\n' + (fail ? 'FAILED ' + fail : 'all green') + '  (' + pass + ' passed)');
 process.exit(fail ? 1 : 0);
