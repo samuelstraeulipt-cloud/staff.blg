@@ -2055,7 +2055,7 @@
               esc(dowOf(r.date)) + '</span></span>' +
             '<span class="fdt">' + esc(r.start) + '</span>' +
             '<span class="fdn' + (gap ? ' gap' : '') + '">' +
-              (gap ? 'Nobody yet' : esc(shortName(r.staffName))) +
+              (gap ? 'No frontdesk' : esc(shortName(r.staffName))) +
               (today ? '<small>today</small>' : '') + '</span>' +
             '<span class="fdh">' + hrs(r.hours) + ' h' +
               (changed ? '<em>plan ' + hrs(r.plannedHours) + '</em>' : '') +
