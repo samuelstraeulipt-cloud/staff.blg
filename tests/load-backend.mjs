@@ -20,7 +20,9 @@ export async function loadBackend() {
     .replace(/^import \{ currentMember, authentication \} from 'wix-members-backend';$/m,
       `import { currentMember, authentication } from '${mocks}';`)
     .replace(/^import wixData from 'wix-data';$/m,
-      `import wixData from '${mocks}';`);
+      `import wixData from '${mocks}';`)
+    .replace(/^import \{ fetch \} from 'wix-fetch';$/m,
+      `import { fetch } from '${mocks}';`);
 
   if (/from '(wix-|@wix\/)/.test(code)) {
     throw new Error('teamhub.web.js imports a Wix module this harness does not stub — ' +

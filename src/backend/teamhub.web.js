@@ -8,6 +8,7 @@
 import { Permissions, webMethod } from 'wix-web-module';
 import { currentMember, authentication } from 'wix-members-backend';
 import wixData from 'wix-data';
+import { fetch } from 'wix-fetch';
 
 const OPT = { suppressAuth: true };
 const pad = n => String(n).padStart(2, '0');
@@ -1269,6 +1270,133 @@ export const getWeek = webMethod(Permissions.SiteMember, async (monday) => {
   return { me: pub(staff), view: 'schedule', monday,
     label: `Week ${label(dates[0])} – ${label(dates[6])} ${dates[6].slice(0, 4)}`,
     prevMonday: shiftDate(monday, -7), nextMonday: shiftDate(monday, 7), days };
+});
+
+/* ------------------------------------------------- SportsNow live schedule
+   The public calendar feed, the one SportsNow support pointed at (22 Sep):
+   POST .../provider/blg-sports-club/live_calendar?date=YYYY-MM-DD with an
+   empty body answers with the Monday–Sunday week containing that date. The
+   date has to be the query string; a date in the body is ignored and GET is
+   a 404. No login, no key.
+
+   This screen only reads. Nothing here writes to Classes — it is the side by
+   side view we want before TeamHub's own class plan is retired, so a
+   difference is visible rather than assumed. Each lesson's own id is in
+   `book_now_link` (.../service_sessions/<id>/...); there is no class_id
+   field, whatever the support email says, and cancelled lessons appear to
+   drop out of the feed rather than carry a status. */
+const SN_URL = 'https://www.sportsnow.ch/platform/api/v1/public/provider/' +
+  'blg-sports-club/live_calendar';
+const tidy = s => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+const nameKey = s => tidy(s).toLowerCase();
+/* "Tiziano  Pedrocchi" is the same person as "Tiziano Pedrocchi", and a
+   first name on its own is how half the Staff titles are written. */
+function sameName(a, b) {
+  const x = nameKey(a), y = nameKey(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  const fx = x.split(' ')[0], fy = y.split(' ')[0];
+  return fx === fy && (x.startsWith(y) || y.startsWith(x));
+}
+/* A lesson with nobody assigned shows the studio's own name. */
+const SN_NOBODY = /^blg\s*sports\s*club$/i;
+
+export const getSportsNowWeek = webMethod(Permissions.SiteMember, async (monday) => {
+  const staff = requireAdmin(await requireStaff());
+  const today = todayISO();
+  /* Any date in the week is fine — it is snapped back to the Monday, because
+     the feed answers with the whole week and the screen has to line up with
+     it. Asking for a Tuesday and labelling it Monday is how a week's classes
+     end up drawn one column out. */
+  {
+    const from = isDate(monday) ? monday : today;
+    const [Y, M, D] = from.split('-').map(Number);
+    const d = new Date(Date.UTC(Y, M - 1, D));
+    d.setUTCDate(d.getUTCDate() - (weekdayOf(from) - 1));
+    monday = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  }
+  const shiftDate = (from, n) => {
+    const [Y, M, D] = from.split('-').map(Number);
+    const d = new Date(Date.UTC(Y, M - 1, D + n));
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  };
+  const dates = [];
+  for (let i = 0; i < 7; i++) dates.push(shiftDate(monday, i));
+
+  let rows;
+  try {
+    const res = await fetch(`${SN_URL}?date=${monday}`, { method: 'post',
+      headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    if (!res.ok) throw new Error('status ' + res.status);
+    rows = await res.json();
+  } catch (e) {
+    throw new Error('SPORTSNOW_UNREACHABLE');
+  }
+  if (!Array.isArray(rows)) throw new Error('SPORTSNOW_UNREACHABLE');
+
+  const plan = await loadPlan();
+  const staffNames = plan.staff.map(p => p.title);
+  const unknown = {};
+
+  const snAt = {};
+  rows.forEach(r => {
+    const date = tidy(r.date);
+    if (!isDate(date)) return;
+    const who = SN_NOBODY.test(tidy(r.team)) ? '' : tidy(r.team);
+    const link = String(r.book_now_link || '');
+    const m = link.match(/service_sessions\/(\d+)/);
+    (snAt[date] = snAt[date] || []).push({
+      time: tidy(r.time_begin), end: tidy(r.time_end), name: tidy(r.name),
+      who, snId: m ? m[1] : '' });
+    if (who && !staffNames.some(n => sameName(n, who))) unknown[who] = true;
+  });
+
+  const DOWS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const label = ds => `${Number(ds.slice(8))} ${MON[Number(ds.slice(5, 7)) - 1]}`;
+
+  let counts = { same: 0, coach: 0, extra: 0, missing: 0 };
+
+  const days = dates.map((date, i) => {
+    /* What TeamHub itself plans for that day — the coach on the class, not
+       who is covering: this screen compares the two plans, not the day's
+       cover arrangements. */
+    const mine = plan.classes.filter(c => classRuns(c, date))
+      .map(c => ({ time: tidy(c.start), name: tidy(c.title),
+                   who: nameOfRow(plan.byId[plan.idOfEmail[mail(c.coachEmail)]]), taken: false }))
+      .sort((a, b) => a.time.localeCompare(b.time));
+
+    const items = (snAt[date] || []).sort((a, b) => a.time.localeCompare(b.time))
+      .map(s => {
+        let hit = mine.find(c => !c.taken && c.time === s.time && sameName(c.name, s.name)) ||
+                  mine.find(c => !c.taken && c.time === s.time);
+        if (!hit) {
+          counts.extra++;
+          return Object.assign({}, s, { tone: 'new', note: 'not in TeamHub' });
+        }
+        hit.taken = true;
+        if (s.who && hit.who && sameName(hit.who, s.who)) {
+          counts.same++;
+          return Object.assign({}, s, { tone: 'ok', note: '' });
+        }
+        counts.coach++;
+        return Object.assign({}, s, { tone: 'coach',
+          note: hit.who ? `TeamHub: ${hit.who}` : 'no coach in TeamHub' });
+      });
+
+    const missing = mine.filter(c => !c.taken)
+      .map(c => ({ time: c.time, name: c.name, who: c.who }));
+    counts.missing += missing.length;
+
+    return { date, dow: DOWS[i], dayLabel: label(date), isToday: date === today,
+             items, missing };
+  });
+
+  return { me: pub(staff), view: 'sportsnow', monday,
+    label: `Week ${label(dates[0])} – ${label(dates[6])} ${dates[6].slice(0, 4)}`,
+    prevMonday: shiftDate(monday, -7), nextMonday: shiftDate(monday, 7),
+    days, counts, unknownCoaches: Object.keys(unknown).sort() };
 });
 
 /* --------------------------------------------------------- team absences */

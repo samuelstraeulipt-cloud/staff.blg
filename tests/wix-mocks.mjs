@@ -56,6 +56,20 @@ export const authentication = {
   }
 };
 
+/* wix-fetch. The SportsNow feed is the only thing the backend fetches; a test
+   sets SN_FEED (rows, or an Error to throw, or a status number). */
+export let FETCH_CALLS = [];
+export let SN_FEED = [];
+export function setFeed(v) { SN_FEED = v; FETCH_CALLS = []; }
+export async function fetch(url, opts) {
+  FETCH_CALLS.push({ url, method: (opts && opts.method) || 'get', body: opts && opts.body });
+  if (SN_FEED instanceof Error) throw SN_FEED;
+  if (typeof SN_FEED === 'number') {
+    return { ok: false, status: SN_FEED, json: async () => ({}) };
+  }
+  return { ok: true, status: 200, json: async () => SN_FEED };
+}
+
 export let CALLS = 0;
 export function calls() { return CALLS; }
 export function resetCalls() { CALLS = 0; }

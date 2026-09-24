@@ -19,7 +19,8 @@
          setAttribute('state', 'loading' | 'ready' | 'error')
          setAttribute('message', 'text to show in the banner')
 
-         `view` is one of: login | month | open | admin | frontdesk | schedule | team.
+         `view` is one of: login | month | open | admin | frontdesk | schedule |
+         sportsnow | team.
          If it is missing the payload is treated as a month, so the original
          page code keeps working untouched.
 
@@ -137,6 +138,7 @@
       show: function (me) { return isCoach(me) || isFD(me); } },
     { key: 'schedule',  label: 'Schedule',      built: true,
       show: function () { return true; } },
+    { key: 'sportsnow', label: 'SportsNow',     built: true, show: isAdmin },
     { key: 'team',      label: 'Team absences', built: true, show: isAdmin },
     { key: 'frontdesk', label: 'Front desk',    built: true,
       show: function (me) { return isAdmin(me) || isFD(me); } }
@@ -926,6 +928,7 @@
           admin:     this._admin,
           frontdesk: this._frontdesk,
           schedule:  this._schedule,
+          sportsnow: this._sportsnow,
           team:      this._team
         }[view] || this._month;
         body = render.call(this, d, message, state);
@@ -1702,6 +1705,95 @@
           '</div></div>');
       });
       out.push('</div></div></div></div></div>');
+      return out.join('');
+    }
+
+    /* ====================================================== SportsNow
+       The same week as Schedule, but as SportsNow has it — read only, so the
+       two plans can be compared before TeamHub's own class plan is retired.
+       { monday, label, prevMonday, nextMonday,
+         counts:{same, coach, extra, missing}, unknownCoaches:[name],
+         days:[{date, dow, dayLabel, isToday,
+                items:[{time, end, name, who, snId, tone, note}],
+                missing:[{time, name, who}]}] }
+       tone is 'ok' | 'coach' | 'new'. */
+    _sportsnow(d, message, state) {
+      var days = d.days || [], c = d.counts || {}, unknown = d.unknownCoaches || [];
+      var out = [this._flash(message, state), '<div class="page">'];
+
+      out.push(this._head('SportsNow',
+        esc(d.label || '') + ' · live from SportsNow, nothing here changes TeamHub',
+        '<button class="btn btn-quiet btn-sm" data-week="' + esc(d.prevMonday || '') +
+          '">‹ Prev</button>' +
+        '<button class="btn btn-quiet btn-sm" data-thisweek="1">This week</button>' +
+        '<button class="btn btn-quiet btn-sm" data-week="' + esc(d.nextMonday || '') +
+          '">Next ›</button>'));
+
+      out.push('<div class="stats">' +
+        statTile(c.same || 0, 'agree') +
+        statTile(c.coach || 0, 'other coach', (c.coach ? 'var(--warn)' : '')) +
+        statTile(c.extra || 0, 'only in SportsNow', (c.extra ? 'var(--warn)' : '')) +
+        statTile(c.missing || 0, 'only in TeamHub', (c.missing ? 'var(--danger)' : '')) +
+        '</div>');
+
+      if (unknown.length) {
+        out.push('<div class="card card-pad" style="border-color:var(--warn)">' +
+          '<span class="label">Coaches TeamHub does not know</span>' +
+          '<div style="font-size:13px;margin-top:6px">' + esc(unknown.join(', ')) +
+          ' — add them to the staff list, or the name in SportsNow is spelled differently.' +
+          '</div></div>');
+      }
+
+      out.push('<div class="card"><div class="mbar"><div class="legend">' +
+        '<span><i style="background:#78ADD2"></i>Same as TeamHub</span>' +
+        '<span><i style="background:var(--warn-tint)"></i>Other coach</span>' +
+        '<span><i style="background:#fff;border:1.5px dashed var(--danger)"></i>' +
+          'Only in SportsNow</span>' +
+        '</div></div><div class="scroller"><div class="wkwrap">');
+
+      out.push('<div class="wk">');
+      days.forEach(function (day) {
+        out.push('<div class="wk-col"><div class="wk-head"' +
+          (day.isToday ? ' style="background:#F0FDF7"' : '') + '>' +
+          '<div class="wk-dow">' + esc(day.dow) + '</div>' +
+          '<div class="wk-date">' + esc(day.dayLabel) + '</div></div>' +
+          '<div class="wk-body">');
+        if (!(day.items || []).length) {
+          out.push('<div style="padding:8px 2px;color:var(--muted);font-size:12px">' +
+            'nothing</div>');
+        }
+        (day.items || []).forEach(function (it) {
+          var cls = it.tone === 'new' ? 'cls open' : 'cls';
+          var style = it.tone === 'coach'
+            ? ' style="background:var(--warn-tint);color:#8A5A00"'
+            : it.tone === 'ok' ? ' style="background:#78ADD2;color:#08243A"' : '';
+          out.push('<div class="' + cls + '"' + style + '>' +
+            '<div class="cls-t">' + esc(it.time) + '</div>' +
+            '<div class="cls-n">' + esc(it.name) + '</div>' +
+            '<div class="cls-c">' + esc(it.who || 'no coach') +
+              (it.note ? ' · ' + esc(it.note) : '') + '</div></div>');
+        });
+        out.push('</div></div>');
+      });
+      out.push('</div>');
+
+      if (c.missing) {
+        out.push('<div class="fd-band">Only in TeamHub — not in SportsNow</div><div class="wk">');
+        days.forEach(function (day) {
+          out.push('<div class="wk-col"><div class="wk-body wk-fd-body">' +
+            (day.missing || []).map(function (m) {
+              return '<div class="cls open"><div class="cls-t">' + esc(m.time) + '</div>' +
+                '<div class="cls-n">' + esc(m.name) + '</div>' +
+                '<div class="cls-c">' + esc(m.who || 'no coach') + '</div></div>';
+            }).join('') + '</div></div>');
+        });
+        out.push('</div>');
+      }
+
+      out.push('</div></div>');
+      out.push('<div class="note-line">This is what SportsNow answers right now. ' +
+        'TeamHub still runs on its own class plan — this screen is here so the two can be ' +
+        'compared before that changes.</div></div></div>');
       return out.join('');
     }
 

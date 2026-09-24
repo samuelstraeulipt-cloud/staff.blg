@@ -304,6 +304,18 @@ const SCREENS = {
       classes: i === 1 ? [{ time: '18:00', name: 'Group Strength', tone: 'open', who: '⚠ Needs cover' }] : [],
       shifts:  i === 1 ? [{ start: '16:00', code: 'FD-TUE', tone: 'assigned', who: 'Anna Meier', colour: '#00E583' }] : []
     })) },
+  sportsnow: { view: 'sportsnow', me: ME, monday: '2027-03-01',
+    label: 'Week 1 Mar – 7 Mar 2027', prevMonday: '2027-02-22', nextMonday: '2027-03-08',
+    counts: { same: 1, coach: 1, extra: 1, missing: 1 }, unknownCoaches: ['Zoe Unknown'],
+    days: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((dow, i) => ({
+      date: '2027-03-0' + (i + 1), dow, dayLabel: (i + 1) + ' Mar', isToday: i === 0,
+      items: i === 1 ? [
+        { time: '18:00', end: '19:00', name: 'Group Strength', who: 'Anna Meier', snId: '1', tone: 'ok', note: '' },
+        { time: '19:00', end: '20:00', name: 'Pilates', who: 'Bea Lang', snId: '2', tone: 'coach', note: 'TeamHub: Dan Klein' },
+        { time: '20:00', end: '21:00', name: 'Yoga Flow', who: 'Zoe Unknown', snId: '3', tone: 'new', note: 'not in TeamHub' }
+      ] : [],
+      missing: i === 1 ? [{ time: '07:00', name: 'Early HYROX', who: 'Anna Meier' }] : []
+    })) },
   team: { view: 'team', me: ME, ym: '2027-03', total: 1,
     people: [{ name: 'Anna Meier', colour: '#00E583',
       sessions: [{ date: '2027-03-02', time: '18:00', name: 'Group Strength',
@@ -371,6 +383,32 @@ await set(FD, 'ready', '');
 await page.waitForTimeout(40);
 ok('no Import from Excel card', await page.evaluate(() =>
   !document.querySelector('blg-teamhub-month').shadowRoot.querySelector('[data-plantext]')));
+
+console.log('\n— SportsNow tab —');
+await set(SCREENS.sportsnow, 'ready', '');
+await page.waitForTimeout(40);
+const snv = await page.evaluate(() => {
+  const sr = document.querySelector('blg-teamhub-month').shadowRoot;
+  return { text: sr.textContent,
+    tab: [...sr.querySelectorAll('[data-go]')].map(b => b.dataset.go + (b.className === 'on' ? '*' : '')).join(','),
+    weeks: [...sr.querySelectorAll('[data-week]')].map(b => b.dataset.week).join(',') };
+});
+ok('the tab is there and active', /sportsnow\*/.test(snv.tab), snv.tab);
+ok('week arrows carry the neighbouring Mondays', snv.weeks === '2027-02-22,2027-03-08', snv.weeks);
+ok('the three kinds of difference are shown', /Group Strength/.test(snv.text) &&
+  /TeamHub: Dan Klein/.test(snv.text) && /not in TeamHub/.test(snv.text));
+ok('a class only TeamHub has is listed', /Early HYROX/.test(snv.text) && /Only in TeamHub/.test(snv.text));
+ok('unknown coaches are named', /Zoe Unknown/.test(snv.text));
+ok('coaches do not get the tab', await page.evaluate(() => {
+  const sr = document.querySelector('blg-teamhub-month').shadowRoot;
+  return !!sr;
+}) && !/sportsnow/.test(await page.evaluate(() => {
+  const el = document.querySelector('blg-teamhub-month');
+  el.setAttribute('data', JSON.stringify(Object.assign({}, { view: 'schedule', me: { id: 'b', name: 'Bea Lang',
+    roles: ['coach'], disciplines: ['group'], colour: '#00E583' }, monday: '2027-03-01',
+    label: 'w', prevMonday: '2027-02-22', nextMonday: '2027-03-08', days: [] })));
+  return [...el.shadowRoot.querySelectorAll('[data-go]')].map(b => b.dataset.go).join(',');
+})));
 
 console.log('\n— errors —');
 ok('no page errors at all', errs.length === 0, errs.slice(0, 4));

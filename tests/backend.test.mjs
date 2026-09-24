@@ -1,7 +1,7 @@
 /* Every assertion here is a bug that was actually shipped, or nearly was. If one
    of these goes red, something in the 16 September code review has come back. */
 import { seed, reset, setMember, resetCalls, calls, db,
-  ACCOUNTS, OUTBOX, resetAccounts, setPolicy } from './wix-mocks.mjs';
+  ACCOUNTS, OUTBOX, resetAccounts, setPolicy, setFeed, FETCH_CALLS } from './wix-mocks.mjs';
 import { loadBackend } from './load-backend.mjs';
 
 const T = await loadBackend();
@@ -409,6 +409,58 @@ await T.importShiftPlan('2027-03-02;FD-TUE;Bea Lang', true);
 const hs = db.Sessions.find(x => x.date === D1);
 ok('an import onto a handed-over shift settles the handover',
   hs && hs.status === 'covered' && hs.coveredById === 'bea', hs);
+
+console.log('\n— SportsNow week (read-only comparison) —');
+world();
+db.Classes.push({ _id: 'c2', title: 'Pilates', weekday: 2, start: '19:00', minutes: 55,
+  discipline: 'more', coachEmail: 'dan@blg.ch' });
+const SN_ROW = (name, time, team) => ({ name, date: D1, time_begin: time, time_end: '19:00',
+  team, location_name: 'BLG', level: 'x',
+  book_now_link: 'https://www.sportsnow.ch/de/providers/blg-sports-club/service_sessions/9911/bookings/new' });
+setFeed([
+  SN_ROW('Group Strength', '18:00', 'Anna  Meier'),     // matches, coach the same
+  SN_ROW('Pilates', '19:00', 'Bea Lang'),               // matches, other coach
+  SN_ROW('Yoga Flow', '20:00', 'Zoe Unknown')           // not in TeamHub at all
+]);
+as('anna');
+await threw('a non-admin reading the SportsNow week', () => T.getSportsNowWeek(D1), 'NOT_ADMIN');
+as('cara');
+let sn = await T.getSportsNowWeek(D1);
+ok('asks SportsNow for that week by query string, POST, empty body',
+  FETCH_CALLS.length === 1 && FETCH_CALLS[0].method === 'post' && FETCH_CALLS[0].body === '{}' &&
+  /live_calendar\?date=2027-03-01$/.test(FETCH_CALLS[0].url), FETCH_CALLS);
+let tue = sn.days.find(d => d.date === D1);
+ok('a matching class reads as agreed', (tue.items.find(i => i.name === 'Group Strength') || {}).tone === 'ok');
+ok('a different coach is flagged, with TeamHub\'s name',
+  (tue.items.find(i => i.name === 'Pilates') || {}).tone === 'coach' &&
+  /Dan Klein/.test((tue.items.find(i => i.name === 'Pilates') || {}).note || ''), tue.items);
+ok('a class only SportsNow has is flagged',
+  (tue.items.find(i => i.name === 'Yoga Flow') || {}).tone === 'new');
+ok('the lesson id comes from the booking link',
+  (tue.items[0] || {}).snId === '9911', tue.items[0]);
+ok('coaches TeamHub does not know are named once',
+  sn.unknownCoaches.join(',') === 'Zoe Unknown', sn.unknownCoaches);
+ok('counts add up', sn.counts.same === 1 && sn.counts.coach === 1 && sn.counts.extra === 1 &&
+  sn.counts.missing === 0, sn.counts);
+ok('nothing was written', db.Classes.length === 2 && db.Sessions.length === 0);
+
+setFeed([SN_ROW('Group Strength', '18:00', 'BLG Sports Club')]);
+sn = await T.getSportsNowWeek(D1);
+tue = sn.days.find(d => d.date === D1);
+ok('the studio name means no coach, not a person',
+  tue.items[0].who === '' && tue.items[0].tone === 'coach' && sn.unknownCoaches.length === 0, tue.items[0]);
+ok('a class SportsNow does not have is listed as missing',
+  tue.missing.length === 1 && tue.missing[0].name === 'Pilates' && sn.counts.missing === 1, tue.missing);
+
+setFeed(new Error('network down'));
+await threw('a feed that will not answer', () => T.getSportsNowWeek(D1), 'SPORTSNOW_UNREACHABLE');
+setFeed(500);
+await threw('a feed answering with an error', () => T.getSportsNowWeek(D1), 'SPORTSNOW_UNREACHABLE');
+setFeed([]);
+sn = await T.getSportsNowWeek(D1);
+ok('an empty week still comes back with seven days', sn.days.length === 7 && sn.counts.extra === 0);
+ok('the week is Monday to Sunday', sn.days[0].date === '2027-03-01' && sn.days[6].date === '2027-03-07',
+  [sn.days[0].date, sn.days[6].date]);
 
 console.log('\n' + (fail ? 'FAILED ' + fail : 'all green') + '  (' + pass + ' passed)');
 process.exit(fail ? 1 : 0);
