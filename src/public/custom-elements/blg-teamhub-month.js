@@ -137,9 +137,13 @@
       show: function (me) { return isCoach(me) || isFD(me); } },
     { key: 'open',      label: 'Open classes',  built: true,
       show: function (me) { return isCoach(me) || isFD(me); } },
-    { key: 'schedule',  label: 'Schedule',      built: true,
+    /* The built schedule is hidden, not deleted: SportsNow is the more
+       accurate plan and now carries the Schedule name. Flip this back to
+       true if the built one is ever needed again. */
+    { key: 'schedule',  label: 'Built schedule', built: true,
+      show: function () { return false; } },
+    { key: 'sportsnow', label: 'Schedule',      built: true,
       show: function () { return true; } },
-    { key: 'sportsnow', label: 'SportsNow',     built: true, show: isAdmin },
     { key: 'team',      label: 'Team absences', built: true, show: isAdmin },
     { key: 'frontdesk', label: 'Front desk',    built: true,
       show: function (me) { return isAdmin(me) || isFD(me); } }
@@ -1725,35 +1729,13 @@
       var days = d.days || [], coaches = d.coaches || [], unknown = d.unknownCoaches || [];
       var out = [this._flash(message, state), '<div class="page">'];
 
-      out.push(this._head('SportsNow',
+      out.push(this._head('Schedule',
         esc(d.label || '') + ' · live from SportsNow',
         '<button class="btn btn-quiet btn-sm" data-week="' + esc(d.prevMonday || '') +
           '">‹ Prev</button>' +
         '<button class="btn btn-quiet btn-sm" data-thisweek="1">This week</button>' +
         '<button class="btn btn-quiet btn-sm" data-week="' + esc(d.nextMonday || '') +
           '">Next ›</button>'));
-
-      /* What the weekly check found. It runs on its own every Monday night;
-         the button is for when somebody has just changed SportsNow and does
-         not want to wait for it. */
-      var changes = d.changes || [];
-      out.push('<div class="card card-pad"><div class="card-head" style="padding:0 0 6px">' +
-        '<h2 class="card-title">What changed</h2>' +
-        '<button class="btn btn-quiet btn-sm" data-sncheck="1">Check now</button></div>');
-      if (changes.length) {
-        out.push('<div class="plan-list">' + changes.map(function (c) {
-          var tone = c.kind === 'cancelled' ? 'pill-bad'
-            : c.kind === 'added' ? 'pill-ok' : 'pill-warn';
-          return '<div><span class="pill ' + tone + '">' + esc(c.kind) + '</span> ' +
-            esc(c.text) + '</div>';
-        }).join('') + '</div>');
-      } else {
-        out.push('<div style="font-size:13px;color:var(--muted);margin-top:4px">' +
-          'Nothing has changed in SportsNow since the last check.</div>');
-      }
-      out.push('<div style="font-size:12px;color:var(--muted);margin-top:8px">' +
-        'Checked every Monday night — new classes, cancellations, coach and time changes.' +
-        '</div></div>');
 
       if (unknown.length) {
         out.push('<div class="card card-pad" style="border-color:var(--warn)">' +
@@ -1797,9 +1779,8 @@
 
       out.push('</div></div></div>');
       out.push('<div class="note-line">Straight from SportsNow, every time this screen is ' +
-        'opened — cancellations and coach changes included. TeamHub still runs its own class ' +
-        'plan for handovers and cover; this is the schedule that will take over from it.' +
-        '</div></div></div>');
+        'opened — cancellations and coach changes included. Handovers and cover still run ' +
+        'on TeamHub\'s own class plan.</div></div></div>');
       return out.join('');
     }
 

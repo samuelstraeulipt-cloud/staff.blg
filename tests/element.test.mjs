@@ -307,8 +307,6 @@ const SCREENS = {
   sportsnow: { view: 'sportsnow', me: ME, monday: '2027-03-01',
     label: 'Week 1 Mar – 7 Mar 2027', prevMonday: '2027-02-22', nextMonday: '2027-03-08',
     classes: 3, unknownCoaches: ['Zoe Unknown'],
-    changes: [{ kind: 'cancelled', text: 'Cancelled: Pilates, 2027-03-03 19:00 — Bea Lang', date: '2027-03-03', at: 1 },
-      { kind: 'coach', text: 'HYROX, 2027-03-04 07:00: Anna Meier → Bea Lang', date: '2027-03-04', at: 1 }],
     coaches: [{ name: 'Anna Meier', colour: '#112233' }, { name: 'Bea Lang', colour: '#00E583' },
       { name: 'Zoe Unknown', colour: null }],
     days: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((dow, i) => ({
@@ -387,18 +385,21 @@ await page.waitForTimeout(40);
 ok('no Import from Excel card', await page.evaluate(() =>
   !document.querySelector('blg-teamhub-month').shadowRoot.querySelector('[data-plantext]')));
 
-console.log('\n— SportsNow tab —');
+console.log('\n— Schedule tab (from SportsNow) —');
 await set(SCREENS.sportsnow, 'ready', '');
 await page.waitForTimeout(40);
 const snv = await page.evaluate(() => {
   const sr = document.querySelector('blg-teamhub-month').shadowRoot;
   return { text: sr.textContent,
     tab: [...sr.querySelectorAll('[data-go]')].map(b => b.dataset.go + (b.className === 'on' ? '*' : '')).join(','),
+    tabLabels: [...sr.querySelectorAll('[data-go]')].map(b => b.textContent.trim()).join(','),
     weeks: [...sr.querySelectorAll('[data-week]')].map(b => b.dataset.week).join(','),
     chips: [...sr.querySelectorAll('.cls')].map(c => c.getAttribute('style') || ''),
     legend: [...sr.querySelectorAll('.legend i')].map(i => i.getAttribute('style') || '') };
 });
 ok('the tab is there and active', /sportsnow\*/.test(snv.tab), snv.tab);
+ok('it is called Schedule, and the built one is gone from the bar',
+  /(^|,)Schedule(,|$)/.test(snv.tabLabels) && !/(^|,)schedule(,|$)/.test(snv.tab), snv.tabLabels);
 ok('week arrows carry the neighbouring Mondays', snv.weeks === '2027-02-22,2027-03-08', snv.weeks);
 ok('the week is shown as a plan, not as a list of corrections',
   /Group Strength/.test(snv.text) && /Pilates/.test(snv.text) &&
@@ -414,24 +415,8 @@ ok('the legend names the week\'s coaches in their colours',
 ok('a name with no colour is flagged so it can be fixed',
   /No colour yet/.test(snv.text) && /Zoe Unknown/.test(snv.text));
 ok('the class count is shown', /3 classes/.test(snv.text));
-const snChecks = [];
-await page.exposeFunction('noteSnCheck', () => snChecks.push(1));
-await page.evaluate(() => document.querySelector('blg-teamhub-month')
-  .addEventListener('teamhub:sncheck', () => window.noteSnCheck()));
-await set(SCREENS.sportsnow, 'ready', '');
-await page.waitForTimeout(40);
-const snText2 = await page.evaluate(() => document.querySelector('blg-teamhub-month').shadowRoot.textContent);
-ok('the changes from the weekly check are shown',
-  /What changed/.test(snText2) && /Cancelled: Pilates/.test(snText2) &&
-  /Anna Meier → Bea Lang/.test(snText2), snText2.slice(0, 200));
-await page.evaluate(() => document.querySelector('blg-teamhub-month').shadowRoot
-  .querySelector('[data-sncheck]').click());
-await page.waitForTimeout(30);
-ok('Check now asks for a fresh check', snChecks.length === 1, snChecks);
-await set(Object.assign({}, SCREENS.sportsnow, { changes: [] }), 'ready', '');
-await page.waitForTimeout(40);
-ok('with nothing changed it says so', /Nothing has changed in SportsNow/.test(
-  await page.evaluate(() => document.querySelector('blg-teamhub-month').shadowRoot.textContent)));
+ok('no change log on the schedule — it is the plan, not a diff',
+  !/What changed/.test(snv.text) && !/Check now/.test(snv.text), snv.text.slice(0, 200));
 
 console.log('\n— errors —');
 ok('no page errors at all', errs.length === 0, errs.slice(0, 4));

@@ -37,8 +37,11 @@ export async function loadBackend() {
       `import { currentMember, authentication } from '${mocks}';`)
     .replace(/^import wixData from 'wix-data';$/m,
       `import wixData from '${mocks}';`)
-    .replace(/^import \{ snWeek, sameName, mondayOf, addDays, checkSportsNow, recentChanges \}\n  from 'backend\/sportsnow.js';$/m,
-      `import { snWeek, sameName, mondayOf, addDays, checkSportsNow, recentChanges } from '${snMod()}';`);
+    /* Whatever the web module happens to pull out of sportsnow.js — the list
+       changes as the SportsNow side grows, and the harness should not have to
+       be edited every time it does. */
+    .replace(/^import (\{[^}]*\})\s*\n?\s*from 'backend\/sportsnow\.js';$/m,
+      (_m, names) => `import ${names} from '${snMod()}';`);
 
   if (/from '(wix-|@wix\/|backend\/)/.test(code)) {
     throw new Error('teamhub.web.js imports a Wix module this harness does not stub — ' +

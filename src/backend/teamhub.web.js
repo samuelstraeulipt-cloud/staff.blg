@@ -8,7 +8,7 @@
 import { Permissions, webMethod } from 'wix-web-module';
 import { currentMember, authentication } from 'wix-members-backend';
 import wixData from 'wix-data';
-import { snWeek, sameName, mondayOf, addDays, checkSportsNow, recentChanges }
+import { snWeek, sameName, mondayOf, addDays, checkSportsNow }
   from 'backend/sportsnow.js';
 
 const OPT = { suppressAuth: true };
@@ -1281,7 +1281,9 @@ export const getWeek = webMethod(Permissions.SiteMember, async (monday) => {
    including the weekly job; this is only the door for the screen. */
 
 export const getSportsNowWeek = webMethod(Permissions.SiteMember, async (monday) => {
-  const staff = requireAdmin(await requireStaff());
+  /* This is the schedule everyone reads now, so every signed-in staff member
+     may ask for it — the same reach the built Schedule had. */
+  const staff = await requireStaff();
   const today = todayISO();
   /* Any date in the week is fine — it is snapped back to its Monday, because
      the feed answers with the whole week and the columns have to line up with
@@ -1291,9 +1293,7 @@ export const getSportsNowWeek = webMethod(Permissions.SiteMember, async (monday)
   const dates = [];
   for (let i = 0; i < 7; i++) dates.push(addDays(from, i));
 
-  const [rows, changes, plan] = await Promise.all([
-    snWeek(from), recentChanges(20), loadPlan()
-  ]);
+  const [rows, plan] = await Promise.all([snWeek(from), loadPlan()]);
 
   /* The colour is the person's own, the same one the Schedule and the month
      use, so a week reads by colour before it reads by name. */
@@ -1331,7 +1331,7 @@ export const getSportsNowWeek = webMethod(Permissions.SiteMember, async (monday)
   return { me: pub(staff), view: 'sportsnow', monday: from,
     label: `Week ${label(dates[0])} – ${label(dates[6])} ${dates[6].slice(0, 4)}`,
     prevMonday: addDays(from, -7), nextMonday: addDays(from, 7),
-    days, classes, coaches, unknownCoaches: Object.keys(unknown).sort(), changes };
+    days, classes, coaches, unknownCoaches: Object.keys(unknown).sort() };
 });
 
 /* The same check the weekly job runs, on demand — for when somebody has just

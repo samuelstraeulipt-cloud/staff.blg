@@ -423,8 +423,10 @@ setFeed([
   SN_ROW('Yoga Flow', '21:00', 'Zoe Unknown')         // not on the staff list
 ]);
 as('anna');
-await threw('a non-admin reading the SportsNow week', () => T.getSportsNowWeek(D1), 'NOT_ADMIN');
+ok('a coach may read the schedule — it is the schedule everyone reads now',
+  (await T.getSportsNowWeek(D1)).days.length === 7);
 as('cara');
+FETCH_CALLS.length = 0;
 let sn = await T.getSportsNowWeek(D1);
 ok('asks SportsNow for that week by query string, POST, empty body',
   FETCH_CALLS.length === 1 && FETCH_CALLS[0].method === 'post' && FETCH_CALLS[0].body === '{}' &&
@@ -515,7 +517,7 @@ ok('the past is left alone', run.added === 0 && db.SnLessons.length === beforePa
 delete db.SnChanges; delete db.SnLessons;
 setFeed([L(1, soon(1), '18:00', 'Group Strength', 'Anna Meier')]);
 ok('the schedule still opens with no store behind it',
-  (await T.getSportsNowWeek(soon(1))).changes.length === 0);
+  (await T.getSportsNowWeek(soon(1))).days.length === 7);
 await threw('but the check says what is missing', () => T.checkSportsNowNow(), 'SPORTSNOW_NO_STORE');
 seed('SnLessons', []); seed('SnChanges', []);
 await T.checkSportsNowNow();          // baseline
@@ -526,10 +528,8 @@ as('anna');
 await threw('a non-admin running the check', () => T.checkSportsNowNow(), 'NOT_ADMIN');
 as('cara');
 const week = await T.getSportsNowWeek(soon(1));
-ok('the screen shows what the checks found, newest first',
-  Array.isArray(week.changes) && week.changes.length > 0 &&
-  typeof week.changes[0].text === 'string' && typeof week.changes[0].at === 'number',
-  (week.changes || []).slice(0, 2));
+ok('the change log stays in the collections and off the screen',
+  week.changes === undefined && db.SnChanges.length > 0, db.SnChanges.length);
 
 console.log('\n' + (fail ? 'FAILED ' + fail : 'all green') + '  (' + pass + ' passed)');
 process.exit(fail ? 1 : 0);
