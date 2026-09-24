@@ -500,7 +500,7 @@ ok('the picked day draws its classes',
   day.names.join(',') === 'Group Strength,Pilates,Yoga Flow', day.names);
 ok('back-to-back classes each get the full width',
   day.evs.every(s => /\/ 1\)/.test(s)), day.evs[0]);
-ok('each block is placed by its time', /top:\s*90px/.test(day.evs[0]), day.evs[0]);
+ok('each block is placed by its time', /top:\s*78px/.test(day.evs[0]), day.evs[0]);
 
 /* Three at 10:00 is the case that decides the layout — they share the
    width rather than landing on top of one another. */
@@ -554,7 +554,16 @@ const fd = await page.evaluate(() => {
 });
 ok('one line per shift', fd.rows === 2, fd.rows);
 ok('the line says day, weekday, start, who and hours',
-  /^2Tue16:00Anna Meier4\.00 h$/.test(fd.first), fd.first);
+  /^2Tue16:00Anna M\.4\.00 h$/.test(fd.first), fd.first);
+/* The line has to survive the narrowest phone still in use. */
+await page.setViewportSize({ width: 320, height: 720 });
+await page.waitForTimeout(60);
+const clipped = await page.evaluate(() =>
+  [...document.querySelector('blg-teamhub-month').shadowRoot.querySelectorAll('.fdn')]
+    .filter(n => n.scrollWidth > n.clientWidth + 1).map(n => n.textContent.trim()));
+ok('and nothing on it is cut off at 320px', clipped.length === 0, clipped);
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(60);
 ok('the weeks are grouped and carry their own total',
   fd.weeks.length === 2 && /^2–2 Mar4\.00 h$/.test(fd.weeks[0]), fd.weeks);
 ok('the month total and who worked it sit on top',
@@ -578,6 +587,19 @@ await page.evaluate(() => document.querySelector('blg-teamhub-month').shadowRoot
 await page.waitForTimeout(50);
 ok('and tapping it again shuts it', !(await page.evaluate(() =>
   !!document.querySelector('blg-teamhub-month').shadowRoot.querySelector('.fdx'))));
+
+/* Opening a shift must patch the row, not rebuild the screen: a rebuild
+   drops the page's height for an instant and the browser clamps the scroll
+   to the top, which from forty rows down reads as nothing having happened. */
+ok('and opening one leaves the rest of the list standing', await page.evaluate(() => {
+  const sr = document.querySelector('blg-teamhub-month').shadowRoot;
+  sr.querySelector('.fdrow').dataset.witness = '1';   // a redraw would lose this
+  sr.querySelectorAll('.fdrow')[1].click();
+  const kept = sr.querySelector('.fdrow').dataset.witness === '1';
+  const open = !!sr.querySelector('.fdx');
+  sr.querySelectorAll('.fdrow')[1].click();           // put it back as it was
+  return kept && open;
+}));
 
 /* An iPhone takes the home-screen tile and the name from the page. Wix puts
    its own .ico there, which iOS cannot use, so that one has to go. */

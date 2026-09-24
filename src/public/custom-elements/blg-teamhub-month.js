@@ -455,56 +455,56 @@
        a day-at-a-time time grid. Both are rendered; the media query below
        decides which one the screen gets. */
     '.narrow-only{display:none}',
-    '.agenda{padding:10px 14px 2px}',
-    '.ag-day{font-family:var(--f-head);font-weight:700;font-size:11px;letter-spacing:.1em;',
-    '  text-transform:uppercase;color:var(--muted);margin:16px 2px 8px}',
+    '.agenda{padding:8px 13px 2px}',
+    '.ag-day{font-family:var(--f-head);font-weight:700;font-size:10.5px;letter-spacing:.1em;',
+    '  text-transform:uppercase;color:var(--muted);margin:13px 2px 6px}',
     '.ag-day:first-child{margin-top:2px}',
     '.ag{display:flex;gap:12px;align-items:stretch;background:var(--card);',
-    '  border:1px solid var(--line);border-radius:14px;padding:12px 13px;margin-bottom:8px}',
+    '  border:1px solid var(--line);border-radius:13px;padding:10px 12px;margin-bottom:6px}',
     '.ag-none{color:var(--muted);font-size:13px}',
-    '.ag-t{flex:none;width:52px}',
-    '.ag-t b{display:block;font-family:var(--f-head);font-size:14px;font-weight:700}',
+    '.ag-t{flex:none;width:48px}',
+    '.ag-t b{display:block;font-family:var(--f-head);font-size:13.5px;font-weight:700}',
     '.ag-t span{display:block;font-size:11.5px;color:var(--muted-2)}',
     '.ag-rail{flex:none;width:4px;border-radius:2px}',
     '.ag-m{min-width:0}',
-    '.ag-m b{display:block;font-family:var(--f-head);font-size:14px;font-weight:600;',
+    '.ag-m b{display:block;font-family:var(--f-head);font-size:13.5px;font-weight:600;',
     '  line-height:1.25}',
-    '.ag-m span{display:block;font-size:12.5px;color:var(--muted);margin-top:2px}',
+    '.ag-m span{display:block;font-size:12px;color:var(--muted);margin-top:1px}',
     /* --------------------------------- phone: the shift plan as a list
        Thirty-one shifts a month: one line each, grouped by week, with the
        picker and the hours box behind a tap. */
-    '.fdtot{display:flex;gap:6px;flex-wrap:wrap;padding:12px 14px 2px;align-items:baseline}',
-    '.fdtot .big{font-family:var(--f-head);font-size:19px;font-weight:700;',
+    '.fdtot{display:flex;gap:6px;flex-wrap:wrap;padding:10px 13px 2px;align-items:baseline}',
+    '.fdtot .big{font-family:var(--f-head);font-size:17px;font-weight:700;',
     '  margin-right:auto;font-variant-numeric:tabular-nums}',
     '.fdtot .t{background:var(--card);border:1px solid var(--line);border-radius:var(--r-pill);',
     '  padding:5px 11px;font-size:12px;color:var(--muted);white-space:nowrap}',
     '.fdtot .t b{font-weight:600;color:var(--text)}',
-    '.wkh{display:flex;align-items:baseline;gap:8px;padding:18px 16px 7px;',
+    '.wkh{display:flex;align-items:baseline;gap:8px;padding:14px 14px 6px;',
     '  font-family:var(--f-head);font-size:11px;font-weight:700;letter-spacing:.08em;',
     '  text-transform:uppercase;color:var(--muted)}',
     '.wkh i{margin-left:auto;font-style:normal;font-size:11.5px;letter-spacing:0;',
     '  text-transform:none;color:var(--muted-2);font-variant-numeric:tabular-nums}',
     '.fdlist{background:var(--card);border-top:1px solid var(--line);',
     '  border-bottom:1px solid var(--line)}',
-    '.fdrow{display:flex;align-items:center;gap:11px;width:100%;padding:9px 14px;',
+    '.fdrow{display:flex;align-items:center;gap:9px;width:100%;padding:7px 13px;',
     '  border:0;border-bottom:1px solid var(--line-2);border-left:3px solid transparent;',
     '  text-align:left;background:none;cursor:pointer}',
     '.fdrow.past{background:#FBFBFC;color:var(--muted)}',
     '.fdrow.today{border-left-color:var(--green-600);background:#F4FDF9}',
     '.fdrow.gap{border-left-color:var(--danger)}',
-    '.fdd{flex:none;width:30px;text-align:center}',
-    '.fdd b{display:block;font-family:var(--f-head);font-size:15px;font-weight:700;',
+    '.fdd{flex:none;width:27px;text-align:center}',
+    '.fdd b{display:block;font-family:var(--f-head);font-size:14px;font-weight:700;',
     '  line-height:1;font-variant-numeric:tabular-nums}',
     '.fdd span{display:block;font-size:9px;letter-spacing:.06em;text-transform:uppercase;',
     '  color:var(--muted-2);margin-top:3px}',
-    '.fdt{flex:none;width:44px;font-size:12.5px;color:var(--muted);',
+    '.fdt{flex:none;width:40px;font-size:12px;color:var(--muted);',
     '  font-variant-numeric:tabular-nums}',
-    '.fdn{flex:1;min-width:0;font-size:14px;font-weight:500;overflow:hidden;',
+    '.fdn{flex:1;min-width:0;font-size:13.5px;font-weight:500;overflow:hidden;',
     '  text-overflow:ellipsis;white-space:nowrap}',
     '.fdn.gap{color:#B4262A;font-weight:600}',
     '.fdn small{display:block;font-size:11px;color:var(--muted-2);font-weight:400}',
-    '.fdh{flex:none;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;',
-    '  text-align:right;min-width:46px}',
+    '.fdh{flex:none;font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums;',
+    '  text-align:right;min-width:42px}',
     '.fdh em{display:block;font-style:normal;font-size:9.5px;color:var(--green-600)}',
     '.fdx{padding:12px 16px 16px;background:#FBFBFC;border-bottom:1px solid var(--line-2)}',
     '.fdx dl{margin:0 0 12px;display:grid;grid-template-columns:76px 1fr;gap:6px 12px;',
@@ -520,19 +520,19 @@
     '  border-radius:11px;background:var(--card);color:var(--text)}',
     '.fdx input.on{border-color:var(--green-600);background:var(--green-tint)}',
 
-    '.snbar{display:flex;align-items:center;gap:10px;padding:12px 14px 0}',
+    '.snbar{display:flex;align-items:center;gap:10px;padding:10px 13px 0}',
     '.snbar .pill{margin-left:auto}',
     '.vseg{display:flex;background:var(--line-2);border-radius:var(--r-pill);padding:3px;gap:2px}',
     '.vseg button{background:none;border:0;padding:6px 14px;border-radius:var(--r-pill);',
     '  font-size:12.5px;font-weight:600;color:var(--muted);cursor:pointer;font-family:inherit}',
     '.vseg button.on{background:var(--card);color:var(--text);box-shadow:var(--shadow)}',
-    '.dstrip{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;padding:10px 10px 12px}',
+    '.dstrip{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;padding:8px 8px 10px}',
     '.dchip{background:none;border:0;display:flex;flex-direction:column;align-items:center;',
     '  gap:5px;padding:3px 0;cursor:pointer;font-family:inherit}',
     '.dchip .d{font-family:var(--f-head);font-weight:700;font-size:10px;letter-spacing:.08em;',
     '  color:var(--muted-2)}',
     '.dchip .n{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;',
-    '  font-family:var(--f-head);font-size:15px;font-weight:600;color:var(--text)}',
+    '  font-family:var(--f-head);font-size:14px;font-weight:600;color:var(--text)}',
     '.dchip .dot{width:4px;height:4px;border-radius:50%;background:var(--muted-2);opacity:.55}',
     '.dchip.on .n{background:var(--black);color:#fff}',
     '.dchip.today .n{box-shadow:inset 0 0 0 2px var(--green-600)}',
@@ -544,7 +544,7 @@
     '  color:var(--muted-2);transform:translateY(-7px)}',
     '.dev{position:absolute;border-radius:12px;padding:7px 9px;overflow:hidden;',
     '  box-shadow:0 1px 2px rgba(11,11,12,.09);display:flex;flex-direction:column;gap:2px}',
-    '.dev .n{font-family:var(--f-head);font-size:12.5px;font-weight:600;line-height:1.2;',
+    '.dev .n{font-family:var(--f-head);font-size:12px;font-weight:600;line-height:1.2;',
     '  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}',
     '.dev .c{font-size:11px;opacity:.76;overflow:hidden;text-overflow:ellipsis;',
     '  white-space:nowrap}',
@@ -558,10 +558,10 @@
        wrapper with a transform on it cannot strand the bar off screen. */
     '.dock{display:none}',
     '.dock button{background:none;border:0;display:flex;flex-direction:column;',
-    '  align-items:center;gap:3px;padding:5px 2px;color:#8C9298;font-size:10px;',
+    '  align-items:center;gap:2px;padding:4px 2px;color:#8C9298;font-size:9.5px;',
     '  font-weight:600;font-family:inherit;cursor:pointer;position:relative}',
     '.dock button.on{color:var(--green)}',
-    '.dock svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.7;',
+    '.dock svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.7;',
     '  stroke-linecap:round;stroke-linejoin:round}',
     '.moremenu{position:absolute;right:8px;bottom:calc(100% + 8px);background:var(--card);',
     '  border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);',
@@ -585,40 +585,45 @@
     '  .logo-word{font-size:14px}',
     '  .nav{display:none}',
     '  .who-name,.who-role{display:none}',
-    '  .page{padding:18px 14px 22px}',
+    '  .page{padding:14px 12px 18px}',
 
     /* A phone reads at arm's length, not across a desk: the whole scale comes
-       down a notch so a screen holds more than three rows of it. */
-    '  .page-head{margin-bottom:16px}',
-    '  .page-title{font-size:19px}',
-    '  .page-sub{font-size:12.5px;margin-top:3px}',
-    '  .card-title{font-size:14px}',
-    '  .card-head{padding:13px 16px;gap:8px}',
-    '  .card-pad{padding:15px 16px}',
-    '  .row{padding:11px 16px;gap:10px}',
-    '  .row-t{font-size:13.5px}',
-    '  .row-s{font-size:11.5px}',
-    '  .qblock{padding:12px 16px}',
-    '  .stats{grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px}',
-    '  .stat{padding:13px 15px}',
-    '  .stat-k{font-size:23px}',
-    '  .stat-l{font-size:10px;margin-top:5px}',
-    '  .mtitle{font-size:16px}',
+       down two notches so a screen holds a useful number of rows. */
+    '  .page-head{margin-bottom:13px}',
+    '  .page-title{font-size:17px}',
+    '  .page-sub{font-size:11.5px;margin-top:2px}',
+    '  .card{border-radius:13px}',
+    '  .card-title{font-size:13px}',
+    '  .card-head{padding:11px 14px;gap:8px}',
+    '  .card-pad{padding:13px 14px}',
+    '  .row{padding:9px 14px;gap:9px}',
+    '  .row-t{font-size:13px}',
+    '  .row-s{font-size:11px;margin-top:2px}',
+    '  .qblock{padding:10px 14px}',
+    '  .qhead{margin-bottom:6px}',
+    '  .stats{grid-template-columns:repeat(2,1fr);gap:7px;margin-bottom:12px}',
+    '  .stat{padding:11px 13px}',
+    '  .stat-k{font-size:20px}',
+    '  .stat-l{font-size:9.5px;margin-top:4px}',
+    '  .mtitle{font-size:15px}',
+    '  .mbar{gap:8px;padding-top:10px;padding-bottom:10px}',
+    '  .pill{height:21px;padding:0 8px;font-size:10px}',
     /* Smaller type, not smaller targets: a thumb still needs something to
-       hit, so the buttons keep their height and only the lettering shrinks. */
-    '  .arrow{width:40px;height:40px}',
-    '  .btn{height:42px;padding:0 16px;font-size:11px}',
-    '  .btn-sm{height:38px;padding:0 14px;font-size:10.5px}',
-    '  .vseg button{padding:9px 15px}',
-    '  .tbl select,.tbl input{height:40px}',
-    '  .signout{height:36px;padding:0 13px}',
-    '  .hedit input{height:38px;width:72px}',
+       hit, so nothing tappable goes under 36px however small the lettering. */
+    '  .arrow{width:38px;height:38px}',
+    '  .btn{height:40px;padding:0 14px;font-size:10.5px}',
+    '  .btn-sm{height:36px;padding:0 12px;font-size:10px}',
+    '  .vseg button{padding:9px 14px;font-size:12px}',
+    '  .tbl select,.tbl input{height:38px}',
+    '  .signout{height:36px;padding:0 12px;font-size:10.5px}',
+    '  .hedit input{height:38px;width:68px}',
     '  .linkbtn{display:inline-block;padding:9px 4px}',
-    '  .label{font-size:10px}',
-    '  .note-line{font-size:12px}',
-    '  .empty{font-size:13px}',
+    '  .label{font-size:9.5px}',
+    '  .note-line{font-size:11.5px;padding-top:10px;padding-bottom:12px}',
+    '  .empty{font-size:12.5px}',
+    '  .avatar{width:26px !important;height:26px !important;font-size:10px !important}',
     '  .card-head,.row,.card-pad,.pick-row,.selbar,.note-line,.mbar{',
-    '    padding-left:16px;padding-right:16px}',
+    '    padding-left:14px;padding-right:14px}',
     '  .actions .btn{flex:1}',
     '  .daychip{min-width:54px}',
 
@@ -837,7 +842,7 @@
     }).join('') + '</div>';
   }
 
-  var SN_HOUR = 76;
+  var SN_HOUR = 64;
 
   function snDayGrid(day) {
     var items = day && day.items ? day.items : [];
@@ -1092,11 +1097,7 @@
       if (el.dataset.more)   { this._more = !this._more; this._render(); return; }
       if (el.dataset.snview) { this._snView = el.dataset.snview; this._render(); return; }
       if (el.dataset.snday)  { this._snDay = Number(el.dataset.snday); this._render(); return; }
-      if (el.dataset.fdrow) {
-        this._fdOpen = this._fdOpen === el.dataset.fdrow ? null : el.dataset.fdrow;
-        this._render();
-        return;
-      }
+      if (el.dataset.fdrow) { this._fdToggle(el.dataset.fdrow, el); return; }
 
       if (el.dataset.req) {
         this._emit('teamhub:request', { sessionId: el.dataset.req, kind: el.dataset.kind });
@@ -2054,7 +2055,7 @@
               esc(dowOf(r.date)) + '</span></span>' +
             '<span class="fdt">' + esc(r.start) + '</span>' +
             '<span class="fdn' + (gap ? ' gap' : '') + '">' +
-              (gap ? 'Needs someone' : esc(r.staffName)) +
+              (gap ? 'Nobody yet' : esc(shortName(r.staffName))) +
               (today ? '<small>today</small>' : '') + '</span>' +
             '<span class="fdh">' + hrs(r.hours) + ' h' +
               (changed ? '<em>plan ' + hrs(r.plannedHours) + '</em>' : '') +
@@ -2066,6 +2067,29 @@
 
       out.push('</div>');
       return out.join('');
+    }
+
+    /* Opening a shift patches the one row instead of redrawing the screen.
+       A full redraw replaces the whole shadow tree, the page briefly loses
+       its height, and the browser clamps the scroll to the top — from the
+       reader's thumb, forty rows down, that looks like nothing happened. */
+    _fdToggle(key, rowEl) {
+      var sr = this.shadowRoot;
+      var open = sr.querySelector('.fdx');
+      if (open && open.parentNode) open.parentNode.removeChild(open);
+      var prev = sr.querySelector('.fdrow[aria-expanded="true"]');
+      if (prev) prev.setAttribute('aria-expanded', 'false');
+
+      if (this._fdOpen === key) { this._fdOpen = null; return; }
+
+      var row = ((this._data && this._data.rows) || []).filter(function (r) {
+        return r.shiftId + '|' + r.date === key;
+      })[0];
+      if (!row) { this._fdOpen = null; return; }
+
+      this._fdOpen = key;
+      rowEl.setAttribute('aria-expanded', 'true');
+      rowEl.insertAdjacentHTML('afterend', this._fdPanel(this._data, row));
     }
 
     /* What a tapped shift opens: the parts that do not fit on the line, and
