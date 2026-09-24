@@ -466,6 +466,7 @@
     '  line-height:1.25}',
     '.ag-m span{display:block;font-size:12.5px;color:var(--muted);margin-top:2px}',
     '.snbar{display:flex;align-items:center;gap:10px;padding:12px 14px 0}',
+    '.snbar .pill{margin-left:auto}',
     '.vseg{display:flex;background:var(--line-2);border-radius:var(--r-pill);padding:3px;gap:2px}',
     '.vseg button{background:none;border:0;padding:6px 14px;border-radius:var(--r-pill);',
     '  font-size:12.5px;font-weight:600;color:var(--muted);cursor:pointer;font-family:inherit}',
@@ -519,20 +520,80 @@
     '  .wkwrap{min-width:820px}',
     '}',
     '@media (max-width:640px){',
+    /* The bar belongs at the foot of the screen even when the page is half
+       empty, so the app is at least a screen tall and the bar is its last row. */
+    '  .app{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column}',
+    '  .page{flex:1 0 auto}',
     '  .topbar-in{flex-wrap:nowrap;padding:0 14px;gap:10px}',
-    '  .logo,.topbar-right{padding:12px 0}',
+    '  .logo,.topbar-right{padding:10px 0}',
+    '  .logo-mark{width:30px;height:30px;font-size:12px}',
+    '  .logo-word{font-size:14px}',
     '  .nav{display:none}',
     '  .who-name,.who-role{display:none}',
-    '  .page{padding:20px 14px 24px}',
-    '  .page-title{font-size:22px}',
+    '  .page{padding:18px 14px 22px}',
+
+    /* A phone reads at arm's length, not across a desk: the whole scale comes
+       down a notch so a screen holds more than three rows of it. */
+    '  .page-head{margin-bottom:16px}',
+    '  .page-title{font-size:19px}',
+    '  .page-sub{font-size:12.5px;margin-top:3px}',
+    '  .card-title{font-size:14px}',
+    '  .card-head{padding:13px 16px;gap:8px}',
+    '  .card-pad{padding:15px 16px}',
+    '  .row{padding:11px 16px;gap:10px}',
+    '  .row-t{font-size:13.5px}',
+    '  .row-s{font-size:11.5px}',
+    '  .qblock{padding:12px 16px}',
+    '  .stats{grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px}',
+    '  .stat{padding:13px 15px}',
+    '  .stat-k{font-size:23px}',
+    '  .stat-l{font-size:9.5px;margin-top:5px}',
+    '  .mtitle{font-size:16px}',
+    '  .arrow{width:30px;height:30px}',
+    '  .btn{height:37px;padding:0 15px;font-size:11px}',
+    '  .btn-sm{height:31px;padding:0 12px;font-size:10.5px}',
+    '  .label{font-size:9.5px}',
+    '  .note-line{font-size:12px}',
+    '  .empty{font-size:13px}',
     '  .card-head,.row,.card-pad,.pick-row,.selbar,.note-line,.mbar{',
     '    padding-left:16px;padding-right:16px}',
     '  .actions .btn{flex:1}',
     '  .daychip{min-width:54px}',
+
+    /* The month bar has to wrap instead of pushing This month off the edge. */
+    '  .mbar{flex-wrap:wrap;gap:10px;padding-top:12px;padding-bottom:12px}',
+    '  .mnav{flex-wrap:wrap;gap:8px}',
+    /* Colour keys are a desktop luxury: the row itself says what it is. */
+    '  .legend{display:none}',
+    /* The schedule card keeps only its count, and that moves next to the
+       Agenda / Day switch — so the bar it lived in goes with the legend. */
+    '  .sn-mbar{display:none}',
+
     '  .wide-only{display:none}',
     '  .narrow-only{display:block}',
     '  .dock{display:grid;position:sticky;bottom:0;z-index:40;background:var(--black);',
     '    border-top:1px solid #1E2125;padding:6px 4px calc(8px + env(safe-area-inset-bottom,0px))}',
+
+    /* The shift table stops being a table: six columns cannot fit, and a
+       sideways scroll is worse than a stack. Each row becomes a small card,
+       with the header cells carried over as labels. */
+    '  .scroller{overflow-x:visible}',
+    '  .tbl{display:block;min-width:0;font-size:13px}',
+    '  .tbl thead{display:none}',
+    '  .tbl tbody,.tbl tr{display:block}',
+    '  .tbl tr{padding:11px 16px;border-bottom:1px solid var(--line-2)}',
+    '  .tbl tr.past{background:#FCFCFD}',
+    '  .tbl td{display:flex;align-items:center;justify-content:space-between;gap:12px;',
+    '    padding:3px 0;border:0;text-align:left}',
+    '  .tbl td::before{content:attr(data-l);flex:none;font-family:var(--f-head);',
+    '    font-weight:600;font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;',
+    '    color:var(--muted-2)}',
+    '  .tbl td.fd-day{font-family:var(--f-head);font-weight:700;font-size:15px;',
+    '    padding-bottom:5px;display:block}',
+    '  .tbl td.fd-day::before{content:none}',
+    '  .tbl select{max-width:none;flex:1;height:36px}',
+    '  .tbl td[colspan]{display:block;color:var(--muted)}',
+    '  .tbl td[colspan]::before{content:none}',
     '}'
   ].join('\n');
 
@@ -1777,15 +1838,18 @@
           : '<span class="hcell">' + hrs(r.hours) + ' h</span>';
 
         var tone = (r.status && r.status.tone) || 'neutral';
+        /* data-l is what the cell is called once the table stacks on a phone;
+           on a desktop the header row says it instead and these are unused. */
         out.push('<tr' + (r.past ? ' class="past"' : '') + '>' +
-          '<td style="white-space:nowrap">' + esc(fmtShort(r.date)) + '</td>' +
-          '<td><strong>' + esc(r.code) + '</strong> ' +
-            '<span style="color:var(--muted);font-size:12px">' + esc(r.label) + '</span></td>' +
-          '<td style="white-space:nowrap;font-variant-numeric:tabular-nums">' +
+          '<td class="fd-day" style="white-space:nowrap">' + esc(fmtShort(r.date)) + '</td>' +
+          '<td data-l="Shift"><span><strong>' + esc(r.code) + '</strong> ' +
+            '<span style="color:var(--muted);font-size:12px">' + esc(r.label) +
+            '</span></span></td>' +
+          '<td data-l="Time" style="white-space:nowrap;font-variant-numeric:tabular-nums">' +
             esc(r.start) + '–' + esc(r.end) + '</td>' +
-          '<td>' + who + '</td>' +
-          '<td style="text-align:right">' + hoursCell + '</td>' +
-          '<td><span class="pill pill-' + esc(tone) + '">' +
+          '<td data-l="Who">' + who + '</td>' +
+          '<td data-l="Hours" style="text-align:right">' + hoursCell + '</td>' +
+          '<td data-l="Status"><span class="pill pill-' + esc(tone) + '">' +
             esc((r.status && r.status.text) || '') + '</span></td></tr>');
       });
       out.push('</tbody></table></div>');
@@ -2006,7 +2070,7 @@
           'they get their colour.</div></div>');
       }
 
-      out.push('<div class="card"><div class="mbar"><div class="legend">' +
+      out.push('<div class="card"><div class="mbar sn-mbar"><div class="legend">' +
         (coaches.length
           ? coaches.map(function (c) {
               return '<span><i style="background:' + esc(c.colour || '#EDEFF2') +
@@ -2039,7 +2103,7 @@
       });
 
       out.push('</div></div></div></div>');        // wk, wkwrap, scroller, wide-only
-      out.push(this._snNarrow(days));
+      out.push(this._snNarrow(days, d.classes || 0));
       out.push('<div class="note-line">Straight from SportsNow, every time this screen is ' +
         'opened — cancellations and coach changes included. Handovers and cover still run ' +
         'on TeamHub\'s own class plan.</div></div></div>');
@@ -2049,7 +2113,7 @@
     /* A phone gets the same week without the seven columns: the days from
        today on as a list, which is what opens, and a day-at-a-time time grid
        behind a toggle. Both switches are answered here, not by the backend. */
-    _snNarrow(days) {
+    _snNarrow(days, classes) {
       var view = this._snView === 'day' ? 'day' : 'agenda';
       var today = -1;
       days.forEach(function (x, i) { if (x.isToday) today = i; });
@@ -2062,7 +2126,8 @@
           (view === 'agenda' ? ' class="on"' : '') + '>Agenda</button>',
         '<button type="button" data-snview="day"' +
           (view === 'day' ? ' class="on"' : '') + '>Day</button>',
-        '</div></div>'];
+        '</div><span class="pill pill-neutral">' + classes + ' ' +
+          (classes === 1 ? 'class' : 'classes') + '</span></div>'];
 
       if (view === 'agenda') {
         /* The week runs Monday to Sunday, but nobody opens this to read about

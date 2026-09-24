@@ -531,10 +531,52 @@ ok('and sit side by side, not on top of each other',
 ok('the one that starts later goes back to the full width',
   piled.filter(s => /\/ 1\)/.test(s)).length === 1, piled);
 
+ok('no colour key on a phone — the rows say it themselves',
+  !(await vis('.legend')) && !(await vis('.sn-mbar')));
+ok('the class count moves in beside the Agenda / Day switch',
+  /35 classes|3 classes/.test(await page.evaluate(() =>
+    document.querySelector('blg-teamhub-month').shadowRoot
+      .querySelector('.snbar').textContent)));
+
+/* The shift table cannot be six columns wide on a phone. */
+await set(FD, 'ready', '');
+await page.waitForTimeout(60);
+const tbl = await page.evaluate(() => {
+  const sr = document.querySelector('blg-teamhub-month').shadowRoot;
+  const t = sr.querySelector('.tbl'), sc = sr.querySelector('.scroller');
+  return { display: getComputedStyle(t).display,
+    head: getComputedStyle(sr.querySelector('.tbl thead')).display,
+    wider: t.getBoundingClientRect().width > sc.getBoundingClientRect().width + 1,
+    labels: [...sr.querySelectorAll('.tbl tbody tr:first-child td')]
+      .map(td => td.dataset.l || '-').join(',') };
+});
+ok('it stacks instead of scrolling sideways',
+  tbl.display === 'block' && tbl.head === 'none' && !tbl.wider, tbl);
+ok('and every cell carries the name its column had',
+  tbl.labels === '-,Shift,Time,Who,Hours,Status', tbl.labels);
+
+/* A half-empty screen must not leave the bar floating in the middle. */
+await set({ view: 'open', me: ME, today: '2027-03-01', mine: [], covered: [] }, 'ready', '');
+await page.waitForTimeout(60);
+const foot = await page.evaluate(() => {
+  const r = document.querySelector('blg-teamhub-month').shadowRoot
+    .querySelector('.dock').getBoundingClientRect();
+  return Math.round(window.innerHeight - r.bottom);
+});
+ok('the bar stays at the foot of the screen with nothing to show', foot <= 2, foot);
+
 await page.setViewportSize({ width: 1200, height: 900 });
 await page.waitForTimeout(40);
-ok('the desktop keeps its seven columns and its top tabs',
-  (await vis('.wide-only')) && (await vis('.nav')) && !(await vis('.dock')));
+await set(SCREENS.sportsnow, 'ready', '');
+await page.waitForTimeout(60);
+ok('the desktop keeps its seven columns, its top tabs and its colour key',
+  (await vis('.wide-only')) && (await vis('.nav')) && (await vis('.legend')) &&
+  !(await vis('.dock')));
+await set(FD, 'ready', '');
+await page.waitForTimeout(60);
+ok('and its shift table is still a table', await page.evaluate(() =>
+  getComputedStyle(document.querySelector('blg-teamhub-month').shadowRoot
+    .querySelector('.tbl')).display === 'table'));
 
 console.log('\n— errors —');
 ok('no page errors at all', errs.length === 0, errs.slice(0, 4));
