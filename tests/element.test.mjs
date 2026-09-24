@@ -653,11 +653,15 @@ const tapped = await page.evaluate(() => {
   const sr = el.shadowRoot;
   sr.querySelector('.dock [data-go="month"]').click();   // nothing answers it yet
   return { lit: sr.querySelector('.dock button.on').dataset.go,
-    waiting: !!sr.querySelector('.skel'),
-    stillSchedule: !!sr.querySelector('.agenda') };
+    placeholder: !!sr.querySelector('.skel'),
+    stillSchedule: /Week 1 Mar – 7 Mar 2027/.test(sr.textContent) };
 });
-ok('the tab lights up before the answer arrives',
-  tapped.lit === 'month' && tapped.waiting && !tapped.stillSchedule, tapped);
+ok('the tab lights up before the answer arrives', tapped.lit === 'month', tapped);
+/* Nothing is flashed in the gap: a placeholder card dropped onto the grey
+   reads as a white block. The screen already up stays until the new one is
+   ready to take its place. */
+ok('and the screen already up stays until the new one is ready',
+  tapped.stillSchedule && !tapped.placeholder, tapped);
 
 await set(SCREENS.month, 'ready', '');
 await page.waitForTimeout(60);
