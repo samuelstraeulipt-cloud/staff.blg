@@ -108,8 +108,16 @@ export async function checkSportsNow(silent) {
   const live = Object.keys(byId).map(id => byId[id])
     .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
 
-  const res = await wixData.query('SnLessons')
-    .ge('date', today).le('date', until).limit(1000).find(OPT);
+  let res;
+  try {
+    res = await wixData.query('SnLessons')
+      .ge('date', today).le('date', until).limit(1000).find(OPT);
+  } catch (e) {
+    /* No store, nothing to compare against — and writing the changes would
+       fail next anyway. Better to say so than to report the whole plan as
+       new every week. */
+    throw new Error('SPORTSNOW_NO_STORE');
+  }
   const was = {}; res.items.forEach(r => { was[r.title] = r; });
 
   const changes = [], fresh = [], updates = [], gone = [];
@@ -170,10 +178,17 @@ export async function checkSportsNow(silent) {
            changes: changes.map(c => ({ kind: c.kind, text: c.text, date: c.lesson.date })) };
 }
 
-/* What the last checks found — newest first, for the SportsNow screen. */
+/* What the last checks found — newest first, for the SportsNow screen.
+   The screen is the schedule and must open whatever the state of the store,
+   so a missing or unreachable `SnChanges` means "nothing to report", not a
+   broken page. The check itself still fails loudly. */
 export async function recentChanges(limit) {
-  const res = await wixData.query('SnChanges').descending('at')
-    .limit(Math.min(Number(limit) || 20, 100)).find(OPT);
-  return res.items.map(r => ({ kind: r.kind, text: r.text, date: r.date,
-    at: r.at ? new Date(r.at).getTime() : null }));
+  try {
+    const res = await wixData.query('SnChanges').descending('at')
+      .limit(Math.min(Number(limit) || 20, 100)).find(OPT);
+    return res.items.map(r => ({ kind: r.kind, text: r.text, date: r.date,
+      at: r.at ? new Date(r.at).getTime() : null }));
+  } catch (e) {
+    return [];
+  }
 }

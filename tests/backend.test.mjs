@@ -503,6 +503,14 @@ setFeed([L(9, '2020-01-06', '18:00', 'Old Class', 'Anna Meier'),
 run = await T.checkSportsNowNow();
 ok('the past is left alone', run.added === 0 && db.SnLessons.length === beforePast, run);
 
+delete db.SnChanges; delete db.SnLessons;
+setFeed([L(1, soon(1), '18:00', 'Group Strength', 'Anna Meier')]);
+ok('the schedule still opens with no store behind it',
+  (await T.getSportsNowWeek(soon(1))).changes.length === 0);
+await threw('but the check says what is missing', () => T.checkSportsNowNow(), 'SPORTSNOW_NO_STORE');
+seed('SnLessons', []); seed('SnChanges', []);
+await T.checkSportsNowNow();          // fill the store again for the checks below
+
 as('anna');
 await threw('a non-admin running the check', () => T.checkSportsNowNow(), 'NOT_ADMIN');
 as('cara');

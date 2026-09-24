@@ -301,6 +301,7 @@ function explain(err) {
   if (code.includes('TOO_MANY_ROWS')) return 'That is more than 1000 rows — paste the rest of the year only.';
   /* A visible error beats a screen that has quietly dropped rows: the numbers
      on it would look perfectly reasonable and be wrong. */
+  if (code.includes('SPORTSNOW_NO_STORE')) return 'The SportsNow collections (SnLessons, SnChanges) are not set up yet, so changes cannot be recorded. The schedule itself still works.';
   if (code.includes('SPORTSNOW_UNREACHABLE')) return 'SportsNow did not answer. Try again in a moment — if it keeps failing, SportsNow is down or has changed its calendar feed.';
   if (code.includes('TRUNCATED')) return 'There is more here than this screen can load at once, so some rows are missing. Tell Sam before trusting the numbers.';
   return 'Something went wrong. Reload the page and try again.';

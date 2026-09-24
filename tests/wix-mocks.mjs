@@ -88,7 +88,10 @@ class Q {
   limit(n) { if (n > 1000) throw new Error('limit above 1000'); this._limit = n; return this; }
   async find() {
     CALLS++;
-    let all = (db[this.name] || []).filter(r => this.fs.every(f => f(r)));
+    /* Wix throws for a collection that does not exist; a mock that quietly
+       answered "no rows" would hide exactly that case. */
+    if (!db[this.name]) throw new Error('WDE0025: collection not found: ' + this.name);
+    let all = db[this.name].filter(r => this.fs.every(f => f(r)));
     if (this._asc) all = all.slice().sort((a, b) =>
       String(a[this._asc]).localeCompare(String(b[this._asc])));
     if (this._desc) all = all.slice().sort((a, b) =>
