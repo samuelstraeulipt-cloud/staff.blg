@@ -471,6 +471,21 @@
     return '';                                  // outdoors — no room, no badge
   }
 
+  /* One lesson on the SportsNow week. The colour says who, the outline says
+     whether TeamHub agrees. A coach TeamHub does not know has no colour, so
+     the chip stays grey and the name still reads. */
+  function snChip(time, name, who, colour, tone, note) {
+    var bg = colour || '#EDEFF2';
+    var style = 'background:' + esc(bg) + ';color:' + ink(bg);
+    if (tone === 'coach') style += ';border:1.5px dashed var(--warn)';
+    if (tone === 'new') style += ';border:1.5px dashed var(--danger)';
+    return '<div class="cls" style="' + style + '">' +
+      '<div class="cls-t">' + esc(time) + '</div>' +
+      '<div class="cls-n">' + esc(name) + '</div>' +
+      '<div class="cls-c">' + esc(who || 'no coach') +
+        (note ? ' · ' + esc(note) : '') + '</div></div>';
+  }
+
   function statTile(k, l, colour) {
     return '<div class="card stat"><div class="stat-k"' +
       (colour ? ' style="color:' + colour + '"' : '') + '>' + k + '</div>' +
@@ -1714,9 +1729,13 @@
        { monday, label, prevMonday, nextMonday,
          counts:{same, coach, extra, missing}, unknownCoaches:[name],
          days:[{date, dow, dayLabel, isToday,
-                items:[{time, end, name, who, snId, tone, note}],
-                missing:[{time, name, who}]}] }
-       tone is 'ok' | 'coach' | 'new'. */
+                items:[{time, end, name, who, colour, snId, tone, note}],
+                missing:[{time, name, who, colour}]}] }
+       tone is 'ok' | 'coach' | 'new'. Colours are the coach's, as on the
+       Schedule — the week is read by colour first. The difference is shown by
+       the outline instead: solid for agreed, a dashed orange one where
+       SportsNow names somebody else, dashed red for a class TeamHub has never
+       heard of. */
     _sportsnow(d, message, state) {
       var days = d.days || [], c = d.counts || {}, unknown = d.unknownCoaches || [];
       var out = [this._flash(message, state), '<div class="page">'];
@@ -1745,8 +1764,9 @@
       }
 
       out.push('<div class="card"><div class="mbar"><div class="legend">' +
-        '<span><i style="background:#78ADD2"></i>Same as TeamHub</span>' +
-        '<span><i style="background:var(--warn-tint)"></i>Other coach</span>' +
+        '<span><i style="background:#B9B9C6"></i>Coach\u2019s colour</span>' +
+        '<span><i style="background:#fff;border:1.5px dashed var(--warn)"></i>' +
+          'Other coach than TeamHub</span>' +
         '<span><i style="background:#fff;border:1.5px dashed var(--danger)"></i>' +
           'Only in SportsNow</span>' +
         '</div></div><div class="scroller"><div class="wkwrap">');
@@ -1763,15 +1783,7 @@
             'nothing</div>');
         }
         (day.items || []).forEach(function (it) {
-          var cls = it.tone === 'new' ? 'cls open' : 'cls';
-          var style = it.tone === 'coach'
-            ? ' style="background:var(--warn-tint);color:#8A5A00"'
-            : it.tone === 'ok' ? ' style="background:#78ADD2;color:#08243A"' : '';
-          out.push('<div class="' + cls + '"' + style + '>' +
-            '<div class="cls-t">' + esc(it.time) + '</div>' +
-            '<div class="cls-n">' + esc(it.name) + '</div>' +
-            '<div class="cls-c">' + esc(it.who || 'no coach') +
-              (it.note ? ' · ' + esc(it.note) : '') + '</div></div>');
+          out.push(snChip(it.time, it.name, it.who, it.colour, it.tone, it.note));
         });
         out.push('</div></div>');
       });
@@ -1782,9 +1794,7 @@
         days.forEach(function (day) {
           out.push('<div class="wk-col"><div class="wk-body wk-fd-body">' +
             (day.missing || []).map(function (m) {
-              return '<div class="cls open"><div class="cls-t">' + esc(m.time) + '</div>' +
-                '<div class="cls-n">' + esc(m.name) + '</div>' +
-                '<div class="cls-c">' + esc(m.who || 'no coach') + '</div></div>';
+              return snChip(m.time, m.name, m.who, m.colour, 'new', '');
             }).join('') + '</div></div>');
         });
         out.push('</div>');

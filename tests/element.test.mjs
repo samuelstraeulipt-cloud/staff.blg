@@ -310,11 +310,11 @@ const SCREENS = {
     days: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((dow, i) => ({
       date: '2027-03-0' + (i + 1), dow, dayLabel: (i + 1) + ' Mar', isToday: i === 0,
       items: i === 1 ? [
-        { time: '18:00', end: '19:00', name: 'Group Strength', who: 'Anna Meier', snId: '1', tone: 'ok', note: '' },
-        { time: '19:00', end: '20:00', name: 'Pilates', who: 'Bea Lang', snId: '2', tone: 'coach', note: 'TeamHub: Dan Klein' },
-        { time: '20:00', end: '21:00', name: 'Yoga Flow', who: 'Zoe Unknown', snId: '3', tone: 'new', note: 'not in TeamHub' }
+        { time: '18:00', end: '19:00', name: 'Group Strength', who: 'Anna Meier', colour: '#112233', snId: '1', tone: 'ok', note: '' },
+        { time: '19:00', end: '20:00', name: 'Pilates', who: 'Bea Lang', colour: '#00E583', snId: '2', tone: 'coach', note: 'TeamHub: Dan Klein' },
+        { time: '20:00', end: '21:00', name: 'Yoga Flow', who: 'Zoe Unknown', colour: null, snId: '3', tone: 'new', note: 'not in TeamHub' }
       ] : [],
-      missing: i === 1 ? [{ time: '07:00', name: 'Early HYROX', who: 'Anna Meier' }] : []
+      missing: i === 1 ? [{ time: '07:00', name: 'Early HYROX', who: 'Anna Meier', colour: '#112233' }] : []
     })) },
   team: { view: 'team', me: ME, ym: '2027-03', total: 1,
     people: [{ name: 'Anna Meier', colour: '#00E583',
@@ -399,6 +399,15 @@ ok('the three kinds of difference are shown', /Group Strength/.test(snv.text) &&
   /TeamHub: Dan Klein/.test(snv.text) && /not in TeamHub/.test(snv.text));
 ok('a class only TeamHub has is listed', /Early HYROX/.test(snv.text) && /Only in TeamHub/.test(snv.text));
 ok('unknown coaches are named', /Zoe Unknown/.test(snv.text));
+const snChips = await page.evaluate(() => [...document.querySelector('blg-teamhub-month')
+  .shadowRoot.querySelectorAll('.cls')].map(c => c.getAttribute('style') || ''));
+ok('each lesson wears its coach\'s colour',
+  snChips.some(st => /background:\s*#112233/.test(st)) &&
+  snChips.some(st => /background:\s*#00E583/.test(st)), snChips.slice(0, 3));
+ok('a different coach is outlined, not recoloured',
+  snChips.some(st => /#00E583/.test(st) && /dashed var\(--warn\)/.test(st)), snChips);
+ok('a class only SportsNow has is outlined red',
+  snChips.some(st => /dashed var\(--danger\)/.test(st)), snChips);
 ok('coaches do not get the tab', await page.evaluate(() => {
   const sr = document.querySelector('blg-teamhub-month').shadowRoot;
   return !!sr;

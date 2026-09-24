@@ -436,6 +436,10 @@ ok('a different coach is flagged, with TeamHub\'s name',
   /Dan Klein/.test((tue.items.find(i => i.name === 'Pilates') || {}).note || ''), tue.items);
 ok('a class only SportsNow has is flagged',
   (tue.items.find(i => i.name === 'Yoga Flow') || {}).tone === 'new');
+ok('each lesson carries its coach\'s colour',
+  (tue.items.find(i => i.name === 'Group Strength') || {}).colour === '#112233' &&
+  (tue.items.find(i => i.name === 'Yoga Flow') || {}).colour === null,
+  tue.items.map(i => i.who + ':' + i.colour));
 ok('the lesson id comes from the booking link',
   (tue.items[0] || {}).snId === '9911', tue.items[0]);
 ok('coaches TeamHub does not know are named once',
@@ -449,8 +453,9 @@ sn = await T.getSportsNowWeek(D1);
 tue = sn.days.find(d => d.date === D1);
 ok('the studio name means no coach, not a person',
   tue.items[0].who === '' && tue.items[0].tone === 'coach' && sn.unknownCoaches.length === 0, tue.items[0]);
-ok('a class SportsNow does not have is listed as missing',
-  tue.missing.length === 1 && tue.missing[0].name === 'Pilates' && sn.counts.missing === 1, tue.missing);
+ok('a class SportsNow does not have is listed as missing, with its colour',
+  tue.missing.length === 1 && tue.missing[0].name === 'Pilates' &&
+  tue.missing[0].colour === '#778899' && sn.counts.missing === 1, tue.missing);
 
 setFeed(new Error('network down'));
 await threw('a feed that will not answer', () => T.getSportsNowWeek(D1), 'SPORTSNOW_UNREACHABLE');

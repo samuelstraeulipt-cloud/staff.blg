@@ -1335,8 +1335,10 @@ export const getSportsNowWeek = webMethod(Permissions.SiteMember, async (monday)
   if (!Array.isArray(rows)) throw new Error('SPORTSNOW_UNREACHABLE');
 
   const plan = await loadPlan();
-  const staffNames = plan.staff.map(p => p.title);
   const unknown = {};
+  /* The colour is the person's, as everywhere else in TeamHub — the schedule
+     is read by colour before it is read by name. */
+  const personNamed = who => plan.staff.find(p => sameName(p.title, who)) || null;
 
   const snAt = {};
   rows.forEach(r => {
@@ -1345,10 +1347,11 @@ export const getSportsNowWeek = webMethod(Permissions.SiteMember, async (monday)
     const who = SN_NOBODY.test(tidy(r.team)) ? '' : tidy(r.team);
     const link = String(r.book_now_link || '');
     const m = link.match(/service_sessions\/(\d+)/);
+    const p = who ? personNamed(who) : null;
     (snAt[date] = snAt[date] || []).push({
       time: tidy(r.time_begin), end: tidy(r.time_end), name: tidy(r.name),
-      who, snId: m ? m[1] : '' });
-    if (who && !staffNames.some(n => sameName(n, who))) unknown[who] = true;
+      who, colour: p ? colourOf(p) : null, snId: m ? m[1] : '' });
+    if (who && !p) unknown[who] = true;
   });
 
   const DOWS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -1363,8 +1366,11 @@ export const getSportsNowWeek = webMethod(Permissions.SiteMember, async (monday)
        who is covering: this screen compares the two plans, not the day's
        cover arrangements. */
     const mine = plan.classes.filter(c => classRuns(c, date))
-      .map(c => ({ time: tidy(c.start), name: tidy(c.title),
-                   who: nameOfRow(plan.byId[plan.idOfEmail[mail(c.coachEmail)]]), taken: false }))
+      .map(c => {
+        const p = plan.byId[plan.idOfEmail[mail(c.coachEmail)]];
+        return { time: tidy(c.start), name: tidy(c.title), who: nameOfRow(p),
+                 colour: p ? colourOf(p) : null, taken: false };
+      })
       .sort((a, b) => a.time.localeCompare(b.time));
 
     const items = (snAt[date] || []).sort((a, b) => a.time.localeCompare(b.time))
@@ -1386,7 +1392,7 @@ export const getSportsNowWeek = webMethod(Permissions.SiteMember, async (monday)
       });
 
     const missing = mine.filter(c => !c.taken)
-      .map(c => ({ time: c.time, name: c.name, who: c.who }));
+      .map(c => ({ time: c.time, name: c.name, who: c.who, colour: c.colour }));
     counts.missing += missing.length;
 
     return { date, dow: DOWS[i], dayLabel: label(date), isToday: date === today,
