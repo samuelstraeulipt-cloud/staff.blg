@@ -11,6 +11,22 @@ import { fileURLToPath, pathToFileURL } from 'url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const SRC = path.join(here, '..', 'src');
 
+/* `backend/sportsnow.js` is a Wix specifier Node cannot resolve, and the file
+   imports Wix modules of its own — so it gets the same treatment as the web
+   module: rewritten once into a temp file the web module can import. */
+function snMod() {
+  const mocks = pathToFileURL(path.join(here, 'wix-mocks.mjs')).href;
+  const code = fs.readFileSync(path.join(SRC, 'backend', 'sportsnow.js'), 'utf8')
+    .replace(/^import wixData from 'wix-data';$/m, `import wixData from '${mocks}';`)
+    .replace(/^import \{ fetch \} from 'wix-fetch';$/m, `import { fetch } from '${mocks}';`);
+  if (/from '(wix-|@wix\/|backend\/)/.test(code)) {
+    throw new Error('sportsnow.js imports something this harness does not stub');
+  }
+  const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'teamhub-sn-')), 'sportsnow.mjs');
+  fs.writeFileSync(tmp, code);
+  return pathToFileURL(tmp).href;
+}
+
 export async function loadBackend() {
   const file = path.join(SRC, 'backend', 'teamhub.web.js');
   const mocks = pathToFileURL(path.join(here, 'wix-mocks.mjs')).href;
@@ -21,10 +37,10 @@ export async function loadBackend() {
       `import { currentMember, authentication } from '${mocks}';`)
     .replace(/^import wixData from 'wix-data';$/m,
       `import wixData from '${mocks}';`)
-    .replace(/^import \{ fetch \} from 'wix-fetch';$/m,
-      `import { fetch } from '${mocks}';`);
+    .replace(/^import \{ snWeek, sameName, mondayOf, addDays, checkSportsNow, recentChanges \}\n  from 'backend\/sportsnow.js';$/m,
+      `import { snWeek, sameName, mondayOf, addDays, checkSportsNow, recentChanges } from '${snMod()}';`);
 
-  if (/from '(wix-|@wix\/)/.test(code)) {
+  if (/from '(wix-|@wix\/|backend\/)/.test(code)) {
     throw new Error('teamhub.web.js imports a Wix module this harness does not stub — ' +
       'add it to wix-mocks.mjs and to the rewrites above.');
   }

@@ -38,6 +38,7 @@ function world() {
     { title: 's1|' + D2, date: D2, shiftId: 's1', staffEmail: 'anna@blg.ch' }
   ]);
   seed('Sessions', []); seed('CoverRequests', []); seed('ShiftOverrides', []); seed('SportsNowTasks', []);
+  seed('SnLessons', []); seed('SnChanges', []);
   return staff;
 }
 const as = who => setMember({ _id: 'm-' + who, loginEmail: who + '@blg.ch', loginEmailVerified: true });
@@ -410,17 +411,16 @@ const hs = db.Sessions.find(x => x.date === D1);
 ok('an import onto a handed-over shift settles the handover',
   hs && hs.status === 'covered' && hs.coveredById === 'bea', hs);
 
-console.log('\n— SportsNow week (read-only comparison) —');
+console.log('\n— SportsNow week (the schedule, read from SportsNow) —');
 world();
-db.Classes.push({ _id: 'c2', title: 'Pilates', weekday: 2, start: '19:00', minutes: 55,
-  discipline: 'more', coachEmail: 'dan@blg.ch' });
 const SN_ROW = (name, time, team) => ({ name, date: D1, time_begin: time, time_end: '19:00',
   team, location_name: 'BLG', level: 'x',
   book_now_link: 'https://www.sportsnow.ch/de/providers/blg-sports-club/service_sessions/9911/bookings/new' });
 setFeed([
-  SN_ROW('Group Strength', '18:00', 'Anna  Meier'),     // matches, coach the same
-  SN_ROW('Pilates', '19:00', 'Bea Lang'),               // matches, other coach
-  SN_ROW('Yoga Flow', '20:00', 'Zoe Unknown')           // not in TeamHub at all
+  SN_ROW('Group Strength', '18:00', 'Anna  Meier'),   // double space, known coach
+  SN_ROW('Pilates', '19:00', 'Bea Lang'),
+  SN_ROW('Open Gym', '20:00', 'BLG Sports Club'),     // nobody on it
+  SN_ROW('Yoga Flow', '21:00', 'Zoe Unknown')         // not on the staff list
 ]);
 as('anna');
 await threw('a non-admin reading the SportsNow week', () => T.getSportsNowWeek(D1), 'NOT_ADMIN');
@@ -429,33 +429,27 @@ let sn = await T.getSportsNowWeek(D1);
 ok('asks SportsNow for that week by query string, POST, empty body',
   FETCH_CALLS.length === 1 && FETCH_CALLS[0].method === 'post' && FETCH_CALLS[0].body === '{}' &&
   /live_calendar\?date=2027-03-01$/.test(FETCH_CALLS[0].url), FETCH_CALLS);
+ok('the week is Monday to Sunday whatever day was asked for',
+  sn.days.length === 7 && sn.days[0].date === '2027-03-01' && sn.days[6].date === '2027-03-07',
+  [sn.days[0].date, sn.days[6].date]);
 let tue = sn.days.find(d => d.date === D1);
-ok('a matching class reads as agreed', (tue.items.find(i => i.name === 'Group Strength') || {}).tone === 'ok');
-ok('a different coach is flagged, with TeamHub\'s name',
-  (tue.items.find(i => i.name === 'Pilates') || {}).tone === 'coach' &&
-  /Dan Klein/.test((tue.items.find(i => i.name === 'Pilates') || {}).note || ''), tue.items);
-ok('a class only SportsNow has is flagged',
-  (tue.items.find(i => i.name === 'Yoga Flow') || {}).tone === 'new');
-ok('each lesson carries its coach\'s colour',
-  (tue.items.find(i => i.name === 'Group Strength') || {}).colour === '#112233' &&
-  (tue.items.find(i => i.name === 'Yoga Flow') || {}).colour === null,
-  tue.items.map(i => i.who + ':' + i.colour));
-ok('the lesson id comes from the booking link',
-  (tue.items[0] || {}).snId === '9911', tue.items[0]);
-ok('coaches TeamHub does not know are named once',
+ok('every lesson of the day is there, earliest first',
+  tue.items.map(i => i.time).join(',') === '18:00,19:00,20:00,21:00' && sn.classes === 4,
+  tue.items.map(i => i.time));
+ok('a known coach gets their own colour and the staff spelling',
+  (tue.items[0] || {}).who === 'Anna Meier' && tue.items[0].colour === '#112233', tue.items[0]);
+ok('the studio name means nobody is on it',
+  tue.items[2].who === '' && tue.items[2].colour === null, tue.items[2]);
+ok('a coach the staff list does not have has no colour',
+  tue.items[3].who === 'Zoe Unknown' && tue.items[3].colour === null, tue.items[3]);
+ok('the lesson id comes from the booking link', tue.items[0].snId === '9911', tue.items[0]);
+ok('the week\'s coaches come back for the legend, in their colours — and a ' +
+  'colour that is really a style attribute is neutralised, not passed on',
+  sn.coaches.map(c => c.name + ':' + c.colour).join(',') ===
+  'Anna Meier:#112233,Bea Lang:#B9B9C6,Zoe Unknown:null', sn.coaches);
+ok('only the unknown name is flagged, once',
   sn.unknownCoaches.join(',') === 'Zoe Unknown', sn.unknownCoaches);
-ok('counts add up', sn.counts.same === 1 && sn.counts.coach === 1 && sn.counts.extra === 1 &&
-  sn.counts.missing === 0, sn.counts);
-ok('nothing was written', db.Classes.length === 2 && db.Sessions.length === 0);
-
-setFeed([SN_ROW('Group Strength', '18:00', 'BLG Sports Club')]);
-sn = await T.getSportsNowWeek(D1);
-tue = sn.days.find(d => d.date === D1);
-ok('the studio name means no coach, not a person',
-  tue.items[0].who === '' && tue.items[0].tone === 'coach' && sn.unknownCoaches.length === 0, tue.items[0]);
-ok('a class SportsNow does not have is listed as missing, with its colour',
-  tue.missing.length === 1 && tue.missing[0].name === 'Pilates' &&
-  tue.missing[0].colour === '#778899' && sn.counts.missing === 1, tue.missing);
+ok('nothing is written anywhere', db.Sessions.length === 0 && db.Classes.length === 1);
 
 setFeed(new Error('network down'));
 await threw('a feed that will not answer', () => T.getSportsNowWeek(D1), 'SPORTSNOW_UNREACHABLE');
@@ -463,9 +457,59 @@ setFeed(500);
 await threw('a feed answering with an error', () => T.getSportsNowWeek(D1), 'SPORTSNOW_UNREACHABLE');
 setFeed([]);
 sn = await T.getSportsNowWeek(D1);
-ok('an empty week still comes back with seven days', sn.days.length === 7 && sn.counts.extra === 0);
-ok('the week is Monday to Sunday', sn.days[0].date === '2027-03-01' && sn.days[6].date === '2027-03-07',
-  [sn.days[0].date, sn.days[6].date]);
+ok('an empty week still comes back with seven days', sn.days.length === 7 && sn.classes === 0);
+
+console.log('\n— the weekly SportsNow check —');
+world(); as('cara');
+const TODAY = new Date();
+const iso = d => d.toISOString().slice(0, 10);
+const soon = n => { const d = new Date(TODAY); d.setUTCDate(d.getUTCDate() + n); return iso(d); };
+const L = (id, date, time, name, team) => ({ name, date, time_begin: time, time_end: '19:00',
+  team, book_now_link: `https://www.sportsnow.ch/de/providers/blg-sports-club/service_sessions/${id}/bookings/new` });
+/* The job asks for six weeks; the mock answers the same rows every time, so
+   each lesson is seen once per week it falls in — only dates inside the
+   window count, and these two are in this week. */
+setFeed([L(1, soon(1), '18:00', 'Group Strength', 'Anna Meier'),
+         L(2, soon(2), '19:00', 'Pilates', 'Bea Lang')]);
+let run = await T.checkSportsNowNow();
+ok('the first run asks SportsNow for six weeks', FETCH_CALLS.length === 6, FETCH_CALLS.length);
+ok('everything is new the first time', run.added === 2 && run.cancelled === 0, run);
+ok('the plan is written down', db.SnLessons.length === 2, db.SnLessons);
+ok('and the changes are listed', db.SnChanges.length === 2 &&
+  /New: Group Strength/.test(db.SnChanges[0].text), db.SnChanges.map(c => c.text));
+
+run = await T.checkSportsNowNow();
+ok('a second run with nothing changed says nothing',
+  run.added === 0 && run.cancelled === 0 && run.changes.length === 0, run);
+ok('and does not double the list', db.SnChanges.length === 2, db.SnChanges.length);
+
+setFeed([L(1, soon(1), '18:00', 'Group Strength', 'Bea Lang')]);   // coach swap + one gone
+run = await T.checkSportsNowNow();
+ok('a coach swap is noticed', run.coach === 1 &&
+  /Anna Meier → Bea Lang/.test((run.changes.find(c => c.kind === 'coach') || {}).text || ''), run.changes);
+ok('a lesson that vanished counts as cancelled', run.cancelled === 1 &&
+  /Cancelled: Pilates/.test((run.changes.find(c => c.kind === 'cancelled') || {}).text || ''), run.changes);
+ok('the written-down plan follows', db.SnLessons.length === 1 &&
+  db.SnLessons[0].coach === 'Bea Lang', db.SnLessons);
+
+setFeed([L(1, soon(3), '07:00', 'Group Strength', 'Bea Lang')]);
+run = await T.checkSportsNowNow();
+ok('a moved lesson is noticed once, as moved', run.other === 1 &&
+  /Moved: Group Strength/.test((run.changes[0] || {}).text || ''), run.changes);
+
+const beforePast = db.SnLessons.length;
+setFeed([L(9, '2020-01-06', '18:00', 'Old Class', 'Anna Meier'),
+         L(1, soon(3), '07:00', 'Group Strength', 'Bea Lang')]);
+run = await T.checkSportsNowNow();
+ok('the past is left alone', run.added === 0 && db.SnLessons.length === beforePast, run);
+
+as('anna');
+await threw('a non-admin running the check', () => T.checkSportsNowNow(), 'NOT_ADMIN');
+as('cara');
+const week = await T.getSportsNowWeek(soon(1));
+ok('the screen shows what the checks found, newest first',
+  Array.isArray(week.changes) && week.changes.length > 0 &&
+  typeof week.changes[0].text === 'string', (week.changes || []).slice(0, 2));
 
 console.log('\n' + (fail ? 'FAILED ' + fail : 'all green') + '  (' + pass + ' passed)');
 process.exit(fail ? 1 : 0);

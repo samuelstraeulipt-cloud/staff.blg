@@ -306,15 +306,18 @@ const SCREENS = {
     })) },
   sportsnow: { view: 'sportsnow', me: ME, monday: '2027-03-01',
     label: 'Week 1 Mar – 7 Mar 2027', prevMonday: '2027-02-22', nextMonday: '2027-03-08',
-    counts: { same: 1, coach: 1, extra: 1, missing: 1 }, unknownCoaches: ['Zoe Unknown'],
+    classes: 3, unknownCoaches: ['Zoe Unknown'],
+    changes: [{ kind: 'cancelled', text: 'Cancelled: Pilates, 2027-03-03 19:00 — Bea Lang', date: '2027-03-03', at: 1 },
+      { kind: 'coach', text: 'HYROX, 2027-03-04 07:00: Anna Meier → Bea Lang', date: '2027-03-04', at: 1 }],
+    coaches: [{ name: 'Anna Meier', colour: '#112233' }, { name: 'Bea Lang', colour: '#00E583' },
+      { name: 'Zoe Unknown', colour: null }],
     days: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((dow, i) => ({
       date: '2027-03-0' + (i + 1), dow, dayLabel: (i + 1) + ' Mar', isToday: i === 0,
       items: i === 1 ? [
-        { time: '18:00', end: '19:00', name: 'Group Strength', who: 'Anna Meier', colour: '#112233', snId: '1', tone: 'ok', note: '' },
-        { time: '19:00', end: '20:00', name: 'Pilates', who: 'Bea Lang', colour: '#00E583', snId: '2', tone: 'coach', note: 'TeamHub: Dan Klein' },
-        { time: '20:00', end: '21:00', name: 'Yoga Flow', who: 'Zoe Unknown', colour: null, snId: '3', tone: 'new', note: 'not in TeamHub' }
-      ] : [],
-      missing: i === 1 ? [{ time: '07:00', name: 'Early HYROX', who: 'Anna Meier', colour: '#112233' }] : []
+        { time: '18:00', end: '19:00', name: 'Group Strength', who: 'Anna Meier', colour: '#112233', snId: '1' },
+        { time: '19:00', end: '20:00', name: 'Pilates', who: 'Bea Lang', colour: '#00E583', snId: '2' },
+        { time: '20:00', end: '21:00', name: 'Yoga Flow', who: 'Zoe Unknown', colour: null, snId: '3' }
+      ] : []
     })) },
   team: { view: 'team', me: ME, ym: '2027-03', total: 1,
     people: [{ name: 'Anna Meier', colour: '#00E583',
@@ -391,33 +394,44 @@ const snv = await page.evaluate(() => {
   const sr = document.querySelector('blg-teamhub-month').shadowRoot;
   return { text: sr.textContent,
     tab: [...sr.querySelectorAll('[data-go]')].map(b => b.dataset.go + (b.className === 'on' ? '*' : '')).join(','),
-    weeks: [...sr.querySelectorAll('[data-week]')].map(b => b.dataset.week).join(',') };
+    weeks: [...sr.querySelectorAll('[data-week]')].map(b => b.dataset.week).join(','),
+    chips: [...sr.querySelectorAll('.cls')].map(c => c.getAttribute('style') || ''),
+    legend: [...sr.querySelectorAll('.legend i')].map(i => i.getAttribute('style') || '') };
 });
 ok('the tab is there and active', /sportsnow\*/.test(snv.tab), snv.tab);
 ok('week arrows carry the neighbouring Mondays', snv.weeks === '2027-02-22,2027-03-08', snv.weeks);
-ok('the three kinds of difference are shown', /Group Strength/.test(snv.text) &&
-  /TeamHub: Dan Klein/.test(snv.text) && /not in TeamHub/.test(snv.text));
-ok('a class only TeamHub has is listed', /Early HYROX/.test(snv.text) && /Only in TeamHub/.test(snv.text));
-ok('unknown coaches are named', /Zoe Unknown/.test(snv.text));
-const snChips = await page.evaluate(() => [...document.querySelector('blg-teamhub-month')
-  .shadowRoot.querySelectorAll('.cls')].map(c => c.getAttribute('style') || ''));
+ok('the week is shown as a plan, not as a list of corrections',
+  /Group Strength/.test(snv.text) && /Pilates/.test(snv.text) &&
+  !/TeamHub:/.test(snv.text) && !/only in/i.test(snv.text), snv.text.slice(0, 200));
 ok('each lesson wears its coach\'s colour',
-  snChips.some(st => /background:\s*#112233/.test(st)) &&
-  snChips.some(st => /background:\s*#00E583/.test(st)), snChips.slice(0, 3));
-ok('a different coach is outlined, not recoloured',
-  snChips.some(st => /#00E583/.test(st) && /dashed var\(--warn\)/.test(st)), snChips);
-ok('a class only SportsNow has is outlined red',
-  snChips.some(st => /dashed var\(--danger\)/.test(st)), snChips);
-ok('coaches do not get the tab', await page.evaluate(() => {
-  const sr = document.querySelector('blg-teamhub-month').shadowRoot;
-  return !!sr;
-}) && !/sportsnow/.test(await page.evaluate(() => {
-  const el = document.querySelector('blg-teamhub-month');
-  el.setAttribute('data', JSON.stringify(Object.assign({}, { view: 'schedule', me: { id: 'b', name: 'Bea Lang',
-    roles: ['coach'], disciplines: ['group'], colour: '#00E583' }, monday: '2027-03-01',
-    label: 'w', prevMonday: '2027-02-22', nextMonday: '2027-03-08', days: [] })));
-  return [...el.shadowRoot.querySelectorAll('[data-go]')].map(b => b.dataset.go).join(',');
-})));
+  snv.chips.some(st => /background:\s*#112233/.test(st)) &&
+  snv.chips.some(st => /background:\s*#00E583/.test(st)), snv.chips);
+ok('a coach with no colour still shows, in grey',
+  snv.chips.some(st => /#EDEFF2/i.test(st)), snv.chips);
+ok('the legend names the week\'s coaches in their colours',
+  snv.legend.some(st => /#112233/.test(st)) && snv.legend.some(st => /#00E583/.test(st)) &&
+  /Anna M\./.test(snv.text) && /Bea L\./.test(snv.text), snv.legend);
+ok('a name with no colour is flagged so it can be fixed',
+  /No colour yet/.test(snv.text) && /Zoe Unknown/.test(snv.text));
+ok('the class count is shown', /3 classes/.test(snv.text));
+const snChecks = [];
+await page.exposeFunction('noteSnCheck', () => snChecks.push(1));
+await page.evaluate(() => document.querySelector('blg-teamhub-month')
+  .addEventListener('teamhub:sncheck', () => window.noteSnCheck()));
+await set(SCREENS.sportsnow, 'ready', '');
+await page.waitForTimeout(40);
+const snText2 = await page.evaluate(() => document.querySelector('blg-teamhub-month').shadowRoot.textContent);
+ok('the changes from the weekly check are shown',
+  /What changed/.test(snText2) && /Cancelled: Pilates/.test(snText2) &&
+  /Anna Meier → Bea Lang/.test(snText2), snText2.slice(0, 200));
+await page.evaluate(() => document.querySelector('blg-teamhub-month').shadowRoot
+  .querySelector('[data-sncheck]').click());
+await page.waitForTimeout(30);
+ok('Check now asks for a fresh check', snChecks.length === 1, snChecks);
+await set(Object.assign({}, SCREENS.sportsnow, { changes: [] }), 'ready', '');
+await page.waitForTimeout(40);
+ok('with nothing changed it says so', /Nothing has changed in SportsNow/.test(
+  await page.evaluate(() => document.querySelector('blg-teamhub-month').shadowRoot.textContent)));
 
 console.log('\n— errors —');
 ok('no page errors at all', errs.length === 0, errs.slice(0, 4));

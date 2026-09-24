@@ -25,7 +25,7 @@ import {
   getOpenBoard, requestCover, withdrawRequest,
   getAdminQueue, assignCover, declineRequest, unassignCover, cancelHandover,
   markSportsNowDone,
-  getFrontDesk, setShiftStaff, importShiftPlan, getSportsNowWeek,
+  getFrontDesk, setShiftStaff, importShiftPlan, getSportsNowWeek, checkSportsNowNow,
   getWeek, getTeamAbsences
 } from 'backend/teamhub.web';
 
@@ -134,6 +134,15 @@ $w.onReady(async function () {
     'Cover changed — the session is open for someone else.'));
   el.on('teamhub:sndone',   (event) => act(
     () => markSportsNowDone(event.detail.taskId), 'Marked as updated in SportsNow.'));
+
+  /* The same check the Monday job runs, on demand. */
+  el.on('teamhub:sncheck', () => act(async () => {
+    const r = await checkSportsNowNow();
+    const n = (r && r.changes && r.changes.length) || 0;
+    return n
+      ? 'Checked — ' + n + (n === 1 ? ' change' : ' changes') + ' since last time.'
+      : 'Checked — nothing has changed in SportsNow.';
+  }, null));
 
   /* The wording depends on what was actually undone, so the backend says. */
   el.on('teamhub:cancel', (event) => act(

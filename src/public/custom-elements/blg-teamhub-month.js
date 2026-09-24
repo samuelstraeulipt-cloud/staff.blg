@@ -38,6 +38,7 @@
          teamhub:cancel    { sessionId }                    admin — the handover is off
          teamhub:sndone    { taskId }                       sportsnow role — updated in SportsNow
          teamhub:setshift  { shiftId, date, staffId }       admin, front desk
+         teamhub:sncheck   {}                               admin — check SportsNow now
          teamhub:plancheck { text }                         admin — check a pasted Excel plan
          teamhub:planapply { text }                         admin — import it
          teamhub:login     { email, password }              sign-in screen
@@ -471,21 +472,6 @@
     return '';                                  // outdoors — no room, no badge
   }
 
-  /* One lesson on the SportsNow week. The colour says who, the outline says
-     whether TeamHub agrees. A coach TeamHub does not know has no colour, so
-     the chip stays grey and the name still reads. */
-  function snChip(time, name, who, colour, tone, note) {
-    var bg = colour || '#EDEFF2';
-    var style = 'background:' + esc(bg) + ';color:' + ink(bg);
-    if (tone === 'coach') style += ';border:1.5px dashed var(--warn)';
-    if (tone === 'new') style += ';border:1.5px dashed var(--danger)';
-    return '<div class="cls" style="' + style + '">' +
-      '<div class="cls-t">' + esc(time) + '</div>' +
-      '<div class="cls-n">' + esc(name) + '</div>' +
-      '<div class="cls-c">' + esc(who || 'no coach') +
-        (note ? ' · ' + esc(note) : '') + '</div></div>';
-  }
-
   function statTile(k, l, colour) {
     return '<div class="card stat"><div class="stat-k"' +
       (colour ? ' style="color:' + colour + '"' : '') + '>' + k + '</div>' +
@@ -654,7 +640,7 @@
             '[data-closeshare],[data-copy],[data-copytable],[data-go],[data-req],' +
             '[data-withdraw],[data-assign],[data-decline],[data-unassign],' +
             '[data-askcancel],[data-nocancel],[data-cancel],[data-authmode],[data-signout],[data-sndone],' +
-            '[data-plancheck],[data-planapply],[data-planclear]')
+            '[data-plancheck],[data-planapply],[data-planclear],[data-sncheck]')
         : null;
       if (!el) return;
 
@@ -679,6 +665,7 @@
       if (el.dataset.decline)  { this._emit('teamhub:decline',  { requestId: el.dataset.decline }); return; }
       if (el.dataset.unassign) { this._emit('teamhub:unassign', { sessionId: el.dataset.unassign }); return; }
       if (el.dataset.sndone)   { this._emit('teamhub:sndone',   { taskId: el.dataset.sndone }); return; }
+      if (el.dataset.sncheck)  { this._emit('teamhub:sncheck',  {}); return; }
       if (el.dataset.plancheck || el.dataset.planapply) {
         var ta = this.shadowRoot.querySelector('[data-plantext]');
         if (ta) this._planText = ta.value;
@@ -1724,54 +1711,70 @@
     }
 
     /* ====================================================== SportsNow
-       The same week as Schedule, but as SportsNow has it — read only, so the
-       two plans can be compared before TeamHub's own class plan is retired.
-       { monday, label, prevMonday, nextMonday,
-         counts:{same, coach, extra, missing}, unknownCoaches:[name],
+       The class plan as SportsNow has it — the studio's own source, and the
+       schedule this app is moving to. Read only: nothing on this screen
+       changes anything, in TeamHub or in SportsNow.
+       { monday, label, prevMonday, nextMonday, classes,
+         coaches:[{name, colour}], unknownCoaches:[name],
+         changes:[{kind, text, date, at}],
          days:[{date, dow, dayLabel, isToday,
-                items:[{time, end, name, who, colour, snId, tone, note}],
-                missing:[{time, name, who, colour}]}] }
-       tone is 'ok' | 'coach' | 'new'. Colours are the coach's, as on the
-       Schedule — the week is read by colour first. The difference is shown by
-       the outline instead: solid for agreed, a dashed orange one where
-       SportsNow names somebody else, dashed red for a class TeamHub has never
-       heard of. */
+                items:[{time, end, name, who, colour, snId}]}] }
+       Every lesson wears its coach's own colour, the same one the Schedule
+       and the month use, so a week reads by colour before it reads by name. */
     _sportsnow(d, message, state) {
-      var days = d.days || [], c = d.counts || {}, unknown = d.unknownCoaches || [];
+      var days = d.days || [], coaches = d.coaches || [], unknown = d.unknownCoaches || [];
       var out = [this._flash(message, state), '<div class="page">'];
 
       out.push(this._head('SportsNow',
-        esc(d.label || '') + ' · live from SportsNow, nothing here changes TeamHub',
+        esc(d.label || '') + ' · live from SportsNow',
         '<button class="btn btn-quiet btn-sm" data-week="' + esc(d.prevMonday || '') +
           '">‹ Prev</button>' +
         '<button class="btn btn-quiet btn-sm" data-thisweek="1">This week</button>' +
         '<button class="btn btn-quiet btn-sm" data-week="' + esc(d.nextMonday || '') +
           '">Next ›</button>'));
 
-      out.push('<div class="stats">' +
-        statTile(c.same || 0, 'agree') +
-        statTile(c.coach || 0, 'other coach', (c.coach ? 'var(--warn)' : '')) +
-        statTile(c.extra || 0, 'only in SportsNow', (c.extra ? 'var(--warn)' : '')) +
-        statTile(c.missing || 0, 'only in TeamHub', (c.missing ? 'var(--danger)' : '')) +
-        '</div>');
+      /* What the weekly check found. It runs on its own every Monday night;
+         the button is for when somebody has just changed SportsNow and does
+         not want to wait for it. */
+      var changes = d.changes || [];
+      out.push('<div class="card card-pad"><div class="card-head" style="padding:0 0 6px">' +
+        '<h2 class="card-title">What changed</h2>' +
+        '<button class="btn btn-quiet btn-sm" data-sncheck="1">Check now</button></div>');
+      if (changes.length) {
+        out.push('<div class="plan-list">' + changes.map(function (c) {
+          var tone = c.kind === 'cancelled' ? 'pill-bad'
+            : c.kind === 'added' ? 'pill-ok' : 'pill-warn';
+          return '<div><span class="pill ' + tone + '">' + esc(c.kind) + '</span> ' +
+            esc(c.text) + '</div>';
+        }).join('') + '</div>');
+      } else {
+        out.push('<div style="font-size:13px;color:var(--muted);margin-top:4px">' +
+          'Nothing has changed in SportsNow since the last check.</div>');
+      }
+      out.push('<div style="font-size:12px;color:var(--muted);margin-top:8px">' +
+        'Checked every Monday night — new classes, cancellations, coach and time changes.' +
+        '</div></div>');
 
       if (unknown.length) {
         out.push('<div class="card card-pad" style="border-color:var(--warn)">' +
-          '<span class="label">Coaches TeamHub does not know</span>' +
+          '<span class="label">No colour yet</span>' +
           '<div style="font-size:13px;margin-top:6px">' + esc(unknown.join(', ')) +
-          ' — add them to the staff list, or the name in SportsNow is spelled differently.' +
-          '</div></div>');
+          ' — not on the staff list, or spelled differently there. Add the name and ' +
+          'they get their colour.</div></div>');
       }
 
       out.push('<div class="card"><div class="mbar"><div class="legend">' +
-        '<span><i style="background:#B9B9C6"></i>Coach\u2019s colour</span>' +
-        '<span><i style="background:#fff;border:1.5px dashed var(--warn)"></i>' +
-          'Other coach than TeamHub</span>' +
-        '<span><i style="background:#fff;border:1.5px dashed var(--danger)"></i>' +
-          'Only in SportsNow</span>' +
-        '</div></div><div class="scroller"><div class="wkwrap">');
+        (coaches.length
+          ? coaches.map(function (c) {
+              return '<span><i style="background:' + esc(c.colour || '#EDEFF2') +
+                (c.colour ? '' : ';border:1px solid var(--line)') + '"></i>' +
+                esc(shortName(c.name)) + '</span>';
+            }).join('')
+          : '<span style="color:var(--muted)">Nobody on the plan this week</span>') +
+        '</div><span class="pill pill-neutral">' + (d.classes || 0) + ' ' +
+        ((d.classes === 1) ? 'class' : 'classes') + '</span>' +
+        '</div><div class="scroller"><div class="wkwrap"><div class="wk">');
 
-      out.push('<div class="wk">');
       days.forEach(function (day) {
         out.push('<div class="wk-col"><div class="wk-head"' +
           (day.isToday ? ' style="background:#F0FDF7"' : '') + '>' +
@@ -1783,27 +1786,20 @@
             'nothing</div>');
         }
         (day.items || []).forEach(function (it) {
-          out.push(snChip(it.time, it.name, it.who, it.colour, it.tone, it.note));
+          var bg = it.colour || '#EDEFF2';
+          out.push('<div class="cls" style="background:' + esc(bg) + ';color:' + ink(bg) + '">' +
+            '<div class="cls-t">' + esc(it.time) + '</div>' +
+            '<div class="cls-n">' + esc(it.name) + '</div>' +
+            '<div class="cls-c">' + esc(it.who || 'no coach') + '</div></div>');
         });
         out.push('</div></div>');
       });
-      out.push('</div>');
 
-      if (c.missing) {
-        out.push('<div class="fd-band">Only in TeamHub — not in SportsNow</div><div class="wk">');
-        days.forEach(function (day) {
-          out.push('<div class="wk-col"><div class="wk-body wk-fd-body">' +
-            (day.missing || []).map(function (m) {
-              return snChip(m.time, m.name, m.who, m.colour, 'new', '');
-            }).join('') + '</div></div>');
-        });
-        out.push('</div>');
-      }
-
-      out.push('</div></div>');
-      out.push('<div class="note-line">This is what SportsNow answers right now. ' +
-        'TeamHub still runs on its own class plan — this screen is here so the two can be ' +
-        'compared before that changes.</div></div></div>');
+      out.push('</div></div></div>');
+      out.push('<div class="note-line">Straight from SportsNow, every time this screen is ' +
+        'opened — cancellations and coach changes included. TeamHub still runs its own class ' +
+        'plan for handovers and cover; this is the schedule that will take over from it.' +
+        '</div></div></div>');
       return out.join('');
     }
 

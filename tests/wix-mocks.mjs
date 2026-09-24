@@ -75,7 +75,7 @@ export function calls() { return CALLS; }
 export function resetCalls() { CALLS = 0; }
 
 class Q {
-  constructor(name) { this.name = name; this.fs = []; this._limit = 50; this._asc = null; }
+  constructor(name) { this.name = name; this.fs = []; this._limit = 50; this._asc = null; this._desc = null; }
   eq(f, v) { this.fs.push(r => r[f] === v); return this; }
   ne(f, v) { this.fs.push(r => r[f] !== v); return this; }
   ge(f, v) { this.fs.push(r => String(r[f]) >= v); return this; }
@@ -83,6 +83,7 @@ class Q {
   hasSome(f, vs) { this.fs.push(r => vs.includes(r[f])); return this; }
   startsWith(f, v) { this.fs.push(r => String(r[f] || '').startsWith(v)); return this; }
   ascending(f) { this._asc = f; return this; }
+  descending(f) { this._desc = f; return this; }
   /* Wix refuses a limit above 1000 — the import once asked for 1200 and failed live. */
   limit(n) { if (n > 1000) throw new Error('limit above 1000'); this._limit = n; return this; }
   async find() {
@@ -90,6 +91,8 @@ class Q {
     let all = (db[this.name] || []).filter(r => this.fs.every(f => f(r)));
     if (this._asc) all = all.slice().sort((a, b) =>
       String(a[this._asc]).localeCompare(String(b[this._asc])));
+    if (this._desc) all = all.slice().sort((a, b) =>
+      String(b[this._desc]).localeCompare(String(a[this._desc])));
     const items = all.slice(0, this._limit).map(r => ({ ...r }));
     /* Both signals the real result carries, so `findAll` can be tested using
        either one on its own. */
