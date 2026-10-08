@@ -6,7 +6,8 @@
    ========================================================================== */
 /* global globalThis */
 import { Permissions, webMethod } from 'wix-web-module';
-import { currentMember, authentication } from 'wix-members-backend';
+import { currentMember, authentication, members } from 'wix-members-backend';
+import { elevate } from 'wix-auth';
 import wixData from 'wix-data';
 import { snWeek, sameName, mondayOf, addDays, checkSportsNow }
   from 'backend/sportsnow.js';
@@ -424,9 +425,32 @@ async function worksShift(staff, shiftId, date) {
      set-password email is the only way in: whoever controls the inbox sets the
      real one.
    - One email per address per ten minutes, so the form cannot be used to flood
-     a colleague's inbox. */
+     a colleague's inbox. The clock is only set once an email has actually gone
+     out: a send that failed is not a send, and must not lock the person out of
+     trying again.
+   - The address on the Staff row is not necessarily the address the member
+     signs in with. Editing Staff.email splits the two apart, and then the
+     set-password mail goes to an address Wix has never heard of. A bound row
+     is therefore asked what its login email really is, and the mail follows
+     the member, not the row. */
 const ACCESS_COOLDOWN_MS = 10 * 60 * 1000;
 const looksLikeEmail = e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) && e.length <= 200;
+
+/* Reading another member needs the Manage Members permission, which the
+   visitor calling this method does not have — hence elevate(). If the site
+   refuses anyway, say so in the log and fall back to the row's address: that
+   is exactly the behaviour this function replaced, so a refusal costs nothing
+   that was not already lost. */
+const getMemberElevated = elevate(members.getMember);
+async function loginEmailOf(memberId) {
+  try {
+    const m = await getMemberElevated(memberId, { fieldsets: ['FULL'] });
+    return mail(m && m.loginEmail) || '';
+  } catch (e) {
+    console.error('requestAccess: cannot read member', memberId, e && e.message);
+    return '';
+  }
+}
 
 function throwawayPassword() {
   const bytes = new Uint8Array(24);
@@ -453,15 +477,25 @@ export const requestAccess = webMethod(Permissions.Anyone, async (rawEmail) => {
 
     const last = Date.parse(staff.accessEmailAt || '') || 0;
     if (Date.now() - last < ACCESS_COOLDOWN_MS) return NEUTRAL;
-    staff.accessEmailAt = new Date().toISOString();
-    await wixData.update('Staff', staff, OPT);
 
-    /* A bound row means the account certainly exists. Otherwise try to create
-       it: registering an address that already has an account fails, and that
-       failure is how we learn it existed — in which case it is not ours to
-       approve. Checking first is not possible without a second members API
-       that needs elevated permissions from here. */
-    if (!staff.memberId) {
+    /* A bound row means an account existed when the row was bound — not that
+       it still answers to the address typed into the form. Ask the member.
+       Sending to its real login email reaches the same person and leaves them
+       with the one account they already have, instead of a second one. */
+    let target = email;
+    if (staff.memberId) {
+      const bound = await loginEmailOf(staff.memberId);
+      if (bound && bound !== email) {
+        /* Not an error the visitor should see, but an admin should: it means
+           somebody edited Staff.email out from under a live account. */
+        console.error('requestAccess: Staff.email and login email disagree for',
+          staff._id, '— sending to the login email');
+      }
+      if (bound) target = bound;
+    } else {
+      /* No bound row, so try to create the account: registering an address
+         that already has one fails, and that failure is how we learn it
+         existed — in which case it is not ours to approve. */
       let created = null;
       try {
         const name = String(staff.title || '').trim().split(/\s+/);
@@ -476,7 +510,14 @@ export const requestAccess = webMethod(Permissions.Anyone, async (rawEmail) => {
       }
     }
 
-    await authentication.sendSetPasswordEmail(email, { hideIgnoreMessage: true });
+    await authentication.sendSetPasswordEmail(target, { hideIgnoreMessage: true });
+
+    /* Only now. Everything above can throw, and a cooldown spent on an email
+       that never left is how somebody ends up locked out of their own
+       recovery for ten minutes at a time, told each time to check an inbox
+       nothing was sent to. */
+    staff.accessEmailAt = new Date().toISOString();
+    await wixData.update('Staff', staff, OPT);
   } catch (e) {
     /* Whatever went wrong, the visitor sees the same sentence. The failure is
        still in the site's logs, which is where an admin would look. */

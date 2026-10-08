@@ -45,7 +45,10 @@ Each assertion is a bug that shipped, or nearly did — they come from the
 - **Getting in** — only an active email on the Staff list gets an account; an
   outsider gets exactly the same answer and nothing is created; an account
   somebody else registered with a colleague's address is never approved by the
-  code; one email per address per ten minutes; junk input writes nothing. In
+  code; one email per address per ten minutes; junk input writes nothing; a
+  row whose email was edited away from the member's login email still reaches
+  that member instead of failing silently; and a send that failed neither
+  spends the ten minutes nor pretends an email went out. In
   the browser: Enter submits, a wrong password keeps the email but not the
   password, the confirmation is neutral, markup typed into the email box is
   shown as text, and there is a way to sign out from the top bar and from the

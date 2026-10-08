@@ -1,7 +1,8 @@
 /* Every assertion here is a bug that was actually shipped, or nearly was. If one
    of these goes red, something in the 16 September code review has come back. */
 import { seed, reset, setMember, resetCalls, calls, db,
-  ACCOUNTS, OUTBOX, resetAccounts, setPolicy, setFeed, FETCH_CALLS } from './wix-mocks.mjs';
+  ACCOUNTS, OUTBOX, resetAccounts, setPolicy, setMembers,
+  setFeed, FETCH_CALLS } from './wix-mocks.mjs';
 import { loadBackend } from './load-backend.mjs';
 
 const T = await loadBackend();
@@ -228,6 +229,45 @@ db.Staff.find(p => p._id === 'dan').memberId = 'm-dan';
 resetCalls();
 await T.requestAccess('dan@blg.ch');
 ok('a bound colleague just gets a reset link', mailsTo('dan@blg.ch') === 1 && ACCOUNTS.length === 1);
+
+/* Chris, 8 October 2026. His Staff email had been edited to an address no
+   account has ever had, while his login email stayed what it always was. The
+   form stamped the cooldown, swallowed the failed send, and told him to check
+   an inbox nothing had been sent to — every time he tried, for three weeks. */
+world(); resetAccounts();
+ACCOUNTS.push({ email: 'dan.private@blg.ch', password: 'his own', status: 'ACTIVE' });
+setMembers({ 'm-dan': 'dan.private@blg.ch' });
+db.Staff.find(p => p._id === 'dan').memberId = 'm-dan';
+await T.requestAccess('dan@blg.ch');
+ok('a row edited away from its login email still reaches the member',
+  mailsTo('dan.private@blg.ch') === 1 && mailsTo('dan@blg.ch') === 0, OUTBOX);
+ok('...and does not leave them holding a second account', ACCOUNTS.length === 1, ACCOUNTS);
+ok('...and stamps the cooldown, because something really was sent',
+  !!db.Staff.find(p => p._id === 'dan').accessEmailAt);
+
+/* If the site will not let us read the member, we are no worse off than the
+   version that never asked. */
+world(); resetAccounts();
+ACCOUNTS.push({ email: 'dan@blg.ch', password: 'his own', status: 'ACTIVE' });
+setMembers({ 'm-dan': 'dan.private@blg.ch' }, true);
+db.Staff.find(p => p._id === 'dan').memberId = 'm-dan';
+await T.requestAccess('dan@blg.ch');
+ok('a refused member lookup falls back to the address on the row',
+  mailsTo('dan@blg.ch') === 1, OUTBOX);
+
+/* The other half of the same bug: a send that failed is not a send, and must
+   not spend the ten minutes. */
+world(); resetAccounts(); setMembers({});
+db.Staff.find(p => p._id === 'dan').memberId = 'm-dan';   // bound, but no account anywhere
+await T.requestAccess('dan@blg.ch');
+ok('a send that failed sends nothing', OUTBOX.length === 0, OUTBOX);
+ok('...and leaves the cooldown unstamped',
+  !db.Staff.find(p => p._id === 'dan').accessEmailAt,
+  db.Staff.find(p => p._id === 'dan').accessEmailAt);
+ACCOUNTS.push({ email: 'dan@blg.ch', password: 'his own', status: 'ACTIVE' });
+await T.requestAccess('dan@blg.ch');
+ok('...so the very next try still gets through', mailsTo('dan@blg.ch') === 1, OUTBOX);
+setMembers({});
 
 world(); resetAccounts(); setPolicy('open');
 await T.requestAccess('anna@blg.ch');

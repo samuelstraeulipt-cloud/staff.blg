@@ -56,6 +56,29 @@ export const authentication = {
   }
 };
 
+/* Reading a member by id, as requestAccess does for a bound row. MEMBERS maps
+   a member id to its real login email; `refused` makes the lookup throw, which
+   is what a site withholding the Manage Members permission would do. */
+export const MEMBERS = {};      // memberId -> loginEmail
+export let MEMBERS_REFUSED = false;
+export function setMembers(map, refused) {
+  Object.keys(MEMBERS).forEach(k => delete MEMBERS[k]);
+  Object.assign(MEMBERS, map || {});
+  MEMBERS_REFUSED = !!refused;
+}
+export const members = {
+  async getMember(id, opts) {
+    if (MEMBERS_REFUSED) throw new Error('permission denied');
+    const loginEmail = MEMBERS[id];
+    if (!loginEmail) throw new Error('member not found');
+    const full = opts && (opts.fieldsets || []).includes('FULL');
+    return full ? { _id: id, loginEmail } : { _id: id };
+  }
+};
+/* elevate() hands back a callable that skips the permission check. The mock
+   keeps the shape without pretending to do anything about permissions. */
+export const elevate = fn => (...args) => fn(...args);
+
 /* wix-fetch. The SportsNow feed is the only thing the backend fetches; a test
    sets SN_FEED (rows, or an Error to throw, or a status number). */
 export let FETCH_CALLS = [];

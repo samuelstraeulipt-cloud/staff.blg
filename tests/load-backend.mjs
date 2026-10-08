@@ -33,8 +33,12 @@ export async function loadBackend() {
   const code = fs.readFileSync(file, 'utf8')
     .replace(/^import \{ Permissions, webMethod \} from 'wix-web-module';$/m,
       `import { Permissions, webMethod } from '${mocks}';`)
-    .replace(/^import \{ currentMember, authentication \} from 'wix-members-backend';$/m,
-      `import { currentMember, authentication } from '${mocks}';`)
+    /* Whatever it pulls out of wix-members-backend and wix-auth, for the same
+       reason as sportsnow.js below: the list grows, the harness shouldn't. */
+    .replace(/^import (\{[^}]*\}) from 'wix-members-backend';$/m,
+      (_m, names) => `import ${names} from '${mocks}';`)
+    .replace(/^import (\{[^}]*\}) from 'wix-auth';$/m,
+      (_m, names) => `import ${names} from '${mocks}';`)
     .replace(/^import wixData from 'wix-data';$/m,
       `import wixData from '${mocks}';`)
     /* Whatever the web module happens to pull out of sportsnow.js — the list
