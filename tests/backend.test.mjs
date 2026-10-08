@@ -508,31 +508,39 @@ const iso = d => d.toISOString().slice(0, 10);
 const soon = n => { const d = new Date(TODAY); d.setUTCDate(d.getUTCDate() + n); return iso(d); };
 const L = (id, date, time, name, team) => ({ name, date, time_begin: time, time_end: '19:00',
   team, book_now_link: `https://www.sportsnow.ch/de/providers/blg-sports-club/service_sessions/${id}/bookings/new` });
-/* The job asks for six weeks; the mock answers the same rows every time, so
-   each lesson is seen once per week it falls in — only dates inside the
-   window count, and these two are in this week. */
+/* The job asks for sixteen weeks; the mock answers the same rows every time,
+   so each lesson is seen once per week it falls in — only dates inside the
+   window count, and these two are in this week.
+
+   The check now does two jobs at once: it compares the feed against last
+   week's picture (these assertions) and it compares the feed against the
+   Classes plan (the section after this one). Keep them apart here, or every
+   lesson the little test world has no class row for turns up as noise. */
+const LESSON = /^(added|cancelled|coach|moved|renamed)$/;
+const lessonChanges = r => r.changes.filter(c => LESSON.test(c.kind));
+const lessonRows = () => db.SnChanges.filter(c => LESSON.test(c.kind));
 setFeed([L(1, soon(1), '18:00', 'Group Strength', 'Anna Meier'),
          L(2, soon(2), '19:00', 'Pilates', 'Bea Lang')]);
 let run = await T.checkSportsNowNow();
-ok('the first run asks SportsNow for four weeks at once', FETCH_CALLS.length === 4, FETCH_CALLS.length);
+ok('the first run asks SportsNow for sixteen weeks at once', FETCH_CALLS.length === 16, FETCH_CALLS.length);
 ok('the first run only takes the picture, it does not cry "new"',
-  run.baseline === true && run.changes.length === 0, run);
+  run.baseline === true && lessonChanges(run).length === 0, run);
 ok('the plan is written down', db.SnLessons.length === 2, db.SnLessons);
-ok('and nothing is reported yet', db.SnChanges.length === 0, db.SnChanges);
+ok('and nothing is reported yet', lessonRows().length === 0, db.SnChanges);
 
 run = await T.checkSportsNowNow();
 ok('a second run with nothing changed says nothing',
   run.added === 0 && run.cancelled === 0 && run.changes.length === 0, run);
-ok('and writes nothing', db.SnChanges.length === 0, db.SnChanges.length);
+ok('and writes nothing', lessonRows().length === 0, lessonRows().length);
 
 setFeed([L(1, soon(1), '18:00', 'Group Strength', 'Anna Meier'),
          L(2, soon(2), '19:00', 'Pilates', 'Bea Lang'),
          L(3, soon(2), '20:00', 'Yoga', 'Anna Meier')]);
 run = await T.checkSportsNowNow();
-ok('a lesson added later is reported', run.added === 1 && db.SnChanges.length === 1 &&
-  /New: Yoga/.test(db.SnChanges[0].text), db.SnChanges.map(c => c.text));
+ok('a lesson added later is reported', run.added === 1 && lessonRows().length === 1 &&
+  /New: Yoga/.test(lessonRows()[0].text), db.SnChanges.map(c => c.text));
 ok('running it twice in a day does not double the list',
-  (await T.checkSportsNowNow(), db.SnChanges.length) === 1, db.SnChanges.length);
+  (await T.checkSportsNowNow(), lessonRows().length) === 1, lessonRows().length);
 
 setFeed([L(1, soon(1), '18:00', 'Group Strength', 'Bea Lang')]);   // coach swap + two gone
 run = await T.checkSportsNowNow();
@@ -570,6 +578,145 @@ as('cara');
 const week = await T.getSportsNowWeek(soon(1));
 ok('the change log stays in the collections and off the screen',
   week.changes === undefined && db.SnChanges.length > 0, db.SnChanges.length);
+
+/* Tanja taught a Saturday Sculpt for three weeks that TeamHub had never heard
+   of: SportsNow gained the class after the plan was imported, and nothing
+   carried it across. My Month, handovers and cover all hang off a Classes
+   row, so for her the class simply did not exist. */
+console.log('\n— the plan catches up with SportsNow —');
+world(); as('cara'); seed('SnLessons', []); seed('SnChanges', []);
+const planRows = () => db.SnChanges.filter(c => /^class-/.test(c.kind));
+const cls = (wd, start) => db.Classes.filter(c => Number(c.weekday) === wd && c.start === start);
+/* A lesson repeating every seven days from `first`, `n` times. */
+/* Ids have to be numbers: the lesson id is parsed out of the booking link
+   with \d+, and a lesson without one is dropped before the comparison. */
+const series = (base, first, n, time, name, team) => {
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(L(base + i, soon(first + i * 7), time, name, team));
+  return out;
+};
+const wdOf = ds => { const w = new Date(ds + 'T00:00:00Z').getUTCDay(); return w === 0 ? 7 : w; };
+const WD_WEEKLY = wdOf(soon(3)), WD_ONCE = wdOf(soon(5)), WD_MONTHLY = wdOf(soon(4));
+
+setFeed([].concat(
+  series(7000, 3, 14, '11:10', 'Sculpt', 'Dan Klein'),             // weekly, new
+  [L(7100, soon(5), '09:00', 'Run for Cookies', 'Anna Meier')],    // a one-off
+  [0, 1, 2].map(i => L(7200 + i, soon(4 + i * 28), '12:30', 'Full Simulation', 'Anna Meier'))
+));
+let p = await T.checkSportsNowNow();
+
+ok('a class SportsNow runs weekly joins the plan as a weekly class',
+  cls(WD_WEEKLY, '11:10').length === 1 && cls(WD_WEEKLY, '11:10')[0].dates === '', cls(WD_WEEKLY, '11:10'));
+ok('...with the coach SportsNow names most often',
+  cls(WD_WEEKLY, '11:10')[0].coachEmail === 'dan@blg.ch', cls(WD_WEEKLY, '11:10')[0]);
+ok('...and its length taken from the lesson, not guessed',
+  cls(WD_WEEKLY, '11:10')[0].minutes === 470, cls(WD_WEEKLY, '11:10')[0].minutes);
+ok('a one-off does NOT become a weekly class',
+  cls(WD_ONCE, '09:00').length === 1 && cls(WD_ONCE, '09:00')[0].dates === soon(5),
+  cls(WD_ONCE, '09:00'));
+ok('a monthly fixture does not either — three in sixteen weeks is not weekly',
+  cls(WD_MONTHLY, '12:30').length === 1 &&
+  cls(WD_MONTHLY, '12:30')[0].dates.split(',').length === 3, cls(WD_MONTHLY, '12:30'));
+ok('every addition is written down', planRows().length === 3, planRows().map(r => r.text));
+ok('a class already in the plan is left alone',
+  db.Classes.filter(c => c._id === 'c1').length === 1 &&
+  db.Classes.find(c => c._id === 'c1').coachEmail === 'anna@blg.ch');
+
+const countBefore = db.Classes.length;
+await T.checkSportsNowNow();
+ok('running it again adds nothing a second time', db.Classes.length === countBefore,
+  db.Classes.length + ' vs ' + countBefore);
+
+/* The occasional class gains a date: that is the whole point of keeping it as
+   a list rather than a weekly row. */
+setFeed([L(7299, soon(4 + 3 * 28), '12:30', 'Full Simulation', 'Anna Meier')]);
+await T.checkSportsNowNow();
+ok('a new date on an occasional class is added to its list',
+  cls(WD_MONTHLY, '12:30')[0].dates.indexOf(soon(4 + 3 * 28)) >= 0,
+  cls(WD_MONTHLY, '12:30')[0].dates);
+
+/* The plan's title drifts from the feed's — "Kettlebell Functional" against
+   "Kettlebell Functional Fitness". Same weekday, same time, same class. */
+world(); as('cara'); seed('SnLessons', []); seed('SnChanges', []);
+db.Classes[0].title = 'Group Strength';
+setFeed(series(7300, 0, 14, '18:00', 'Group Strength Circuit', 'Anna Meier')
+  .filter(r => wdOf(r.date) === 2));
+await T.checkSportsNowNow();
+ok('a renamed class is not added a second time under its new name',
+  db.Classes.filter(c => Number(c.weekday) === 2 && c.start === '18:00').length === 1,
+  db.Classes.filter(c => Number(c.weekday) === 2));
+
+/* Two classes share the Sunday 10:00 slot, and the feed calls the run "BLG
+   Free Community Run" while the plan calls it "BLG Community Run". Matching
+   on the title alone would add a second Sunday run every week. */
+world(); as('cara'); seed('SnLessons', []); seed('SnChanges', []);
+seed('Classes', [
+  { _id: 'r1', title: 'Fullbody Strength', weekday: 7, start: '10:00', minutes: 55,
+    discipline: 'group', coachEmail: 'anna@blg.ch' },
+  { _id: 'r2', title: 'BLG Community Run', weekday: 7, start: '10:00', minutes: 60,
+    discipline: '', coachEmail: 'bea@blg.ch' }
+]);
+const sun = n => { let d = soon(n); while (wdOf(d) !== 7) d = soon(++n); return n; };
+const S0 = sun(1);
+setFeed([].concat(
+  series(7500, S0, 12, '10:00', 'BLG Free Community Run', 'Bea Lang'),
+  series(7600, S0, 12, '10:00', 'Fullbody Strength', 'Anna Meier')
+));
+await T.checkSportsNowNow();
+ok('a longer name in the feed matches the plan\'s shorter one in the same slot',
+  db.Classes.filter(c => Number(c.weekday) === 7 && c.start === '10:00').length === 2,
+  db.Classes.filter(c => Number(c.weekday) === 7).map(c => c.title));
+
+/* Two classes in one slot, and the feed's name for one of them is a longer
+   wording rather than a longer version of the same words. Half the shorter
+   name repeated is enough to call it the same class. */
+world(); as('cara'); seed('SnLessons', []); seed('SnChanges', []);
+seed('Classes', [
+  { _id: 'a1', title: 'Advanced HYROX Comp', weekday: 6, start: '12:00', minutes: 90,
+    discipline: 'group', coachEmail: 'anna@blg.ch' },
+  { _id: 'a2', title: 'Booty & Core', weekday: 6, start: '12:00', minutes: 55,
+    discipline: 'group', coachEmail: 'bea@blg.ch' }
+]);
+const sat = n => { let m = n; while (wdOf(soon(m)) !== 6) m++; return m; };
+const T0 = sat(1);
+setFeed([].concat(
+  series(7700, T0, 12, '12:00', 'Advanced Hyrox Competition Class - Only for Competitors', 'Anna Meier'),
+  series(7800, T0, 12, '12:00', 'Booty & Core', 'Bea Lang')
+));
+await T.checkSportsNowNow();
+ok('a differently worded name in a shared slot is still the same class',
+  db.Classes.filter(c => Number(c.weekday) === 6 && c.start === '12:00').length === 2,
+  db.Classes.filter(c => Number(c.weekday) === 6).map(c => c.title));
+
+/* ...but two genuinely different classes at one time stay two. */
+world(); as('cara'); seed('SnLessons', []); seed('SnChanges', []);
+seed('Classes', [
+  { _id: 'b1', title: 'Pilates', weekday: 6, start: '10:00', minutes: 55,
+    discipline: 'more', coachEmail: 'dan@blg.ch' }
+]);
+setFeed([].concat(
+  series(7900, T0, 12, '10:00', 'Pilates', 'Dan Klein'),
+  series(8000, T0, 12, '10:00', 'Team Up', 'Anna Meier')
+));
+await T.checkSportsNowNow();
+ok('two classes sharing a slot with nothing in common stay two',
+  db.Classes.filter(c => Number(c.weekday) === 6 && c.start === '10:00').length === 2 &&
+  db.Classes.some(c => c.title === 'Team Up'),
+  db.Classes.filter(c => Number(c.weekday) === 6).map(c => c.title));
+
+/* A coach the staff list does not have must not be guessed at. */
+world(); as('cara'); seed('SnLessons', []); seed('SnChanges', []);
+setFeed(series(7400, 3, 14, '06:30', 'Sunrise Yoga', 'Somebody Else'));
+const planRun = await T.checkSportsNowNow();
+ok('a class whose coach is nobody on the staff list is added without one',
+  cls(WD_WEEKLY, '06:30').length === 1 && cls(WD_WEEKLY, '06:30')[0].coachEmail === '',
+  cls(WD_WEEKLY, '06:30'));
+ok('...and says so rather than quietly assigning it',
+  planRun.planUnresolved === 1 && /NO COACH/.test(planRows().map(x => x.text).join(' ')),
+  planRows().map(x => x.text));
+ok('...which leaves it on nobody\'s month until an admin says whose it is',
+  (as('anna'), (await T.getMyMonth((new Date()).toISOString().slice(0, 7)))
+    .items.filter(i => /Sunrise Yoga/.test(i.name)).length) === 0);
 
 console.log('\n' + (fail ? 'FAILED ' + fail : 'all green') + '  (' + pass + ' passed)');
 process.exit(fail ? 1 : 0);
