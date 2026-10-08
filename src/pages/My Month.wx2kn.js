@@ -45,7 +45,12 @@ let shown = null;     // the data the element is showing now
    because a write can change screens other than the one in front of you. */
 const seen = new Map();
 let loadSeq = 0;
-const keyFor = v => v + '|' + (ym || '') + '|' + (monday || '');
+/* A screen is keyed by the one thing it reads. Keying every screen by both
+   the month and the week meant My Month was stored during the prefetch while
+   `monday` was still empty, then looked up once a week screen had filled it
+   in — a different key, so the most-used tab never hit its own cache. */
+const BY_WEEK = { sportsnow: 1, schedule: 1 };
+const keyFor = v => v + '|' + (BY_WEEK[v] ? (monday || '') : (ym || ''));
 const screenKey = () => keyFor(view);
 
 /* Keeping the last answer made coming *back* to a screen instant; the first
