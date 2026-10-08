@@ -439,6 +439,35 @@ ok('an absence on a date it does not run records nothing',
 
 /* Handing a class over has to agree with the month about which dates exist,
    or a coach sees a class, taps "can't make it", and nothing happens. */
+/* Alessia has no email. Indexing staff by email put her under the key '' —
+   and then every unstaffed shift and every class with no coach resolved to
+   her. Setting a shift to "kein Frontdesk" showed her standing at it. */
+console.log('\n— a blank email is not a person —');
+world(); as('cara');
+db.Staff.push({ _id: 'blank', title: 'Alessia', email: '', roles: 'frontdesk,coach',
+  disciplines: 'group', colour: '#BFE0EE' });
+db.ShiftAssignments.find(a => a.date === D1).staffEmail = '';
+let fdb = await T.getFrontDesk(YM);
+let fdr = fdb.rows.find(x => x.date === D1 && x.shiftId === 's1');
+ok('a shift set to nobody names nobody', fdr && !fdr.staffId && !fdr.staffName,
+  fdr && { id: fdr.staffId, name: fdr.staffName });
+ok('...and reads as unstaffed', fdr && /kein Frontdesk/.test(fdr.status.text),
+  fdr && fdr.status);
+ok('...and she is not credited with its hours',
+  !(fdb.totals.find(t => t.id === 'blank') || { hours: 0 }).hours,
+  fdb.totals.filter(t => t.id === 'blank'));
+
+/* The same key, reached from the other side: a class nobody is down for. */
+world();
+db.Staff.push({ _id: 'blank', title: 'Alessia', email: '', roles: 'coach',
+  disciplines: 'group', colour: '#BFE0EE', memberId: 'm-blank' });
+db.Classes.find(c => c._id === 'c1').coachEmail = '';
+setFeed([SN(1, D1, '18:00', 'Group Strength', '')]);     // the studio names nobody
+setMember({ _id: 'm-blank', loginEmail: 'blank@blg.ch', loginEmailVerified: true });
+const bm2 = await T.getMyMonth(YM);
+ok('a class with no coach is on nobody\'s month either',
+  !bm2.items.some(i => i.kind === 'class'), bm2.items.filter(i => i.kind === 'class'));
+
 console.log('\n— a handover follows the schedule too —');
 world(); as('anna');
 setFeed([SN(1, D2, '18:00', 'Group Strength', 'Anna Meier')]);   // D1 off that week

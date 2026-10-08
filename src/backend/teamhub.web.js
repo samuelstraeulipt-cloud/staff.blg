@@ -222,7 +222,15 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
   const classFor = classIndex(cRes.items);
 
   const nameOf = {}, idOfEmail = {};
-  stRes.items.forEach(p => { nameOf[p._id] = p.title; idOfEmail[mail(p.email)] = p._id; });
+  /* Only rows that have an email. Indexing a blank one puts whoever happens to
+     be last in the query under the key '' — and then every unstaffed shift and
+     every class with no coach resolves to that person. That is exactly how a
+     front desk set to "kein Frontdesk" came back showing Alessia. */
+  stRes.items.forEach(p => {
+    nameOf[p._id] = p.title;
+    const e = mail(p.email);
+    if (e) idOfEmail[e] = p._id;
+  });
 
   const idOfStaffName = who => idOfStaffNameIn(stRes.items, who);
   /* A lesson's own length, when the feed gives both ends of it. */
@@ -635,8 +643,9 @@ async function loadPlan(ym) {
   const byId = {}, idOfEmail = {}, emailOfId = {};
   stRes.items.forEach(p => {
     byId[p._id] = p;
-    idOfEmail[mail(p.email)] = p._id;
-    emailOfId[p._id] = mail(p.email);
+    const e = mail(p.email);
+    if (e) idOfEmail[e] = p._id;          // never index a blank — see getMyMonth
+    emailOfId[p._id] = e;
   });
   return { classes: cRes.items.filter(c => !isOff(c.active)),
            shifts: shRes.items.filter(s => !isOff(s.active)),
