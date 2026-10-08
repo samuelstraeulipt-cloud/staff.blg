@@ -411,6 +411,8 @@
     '.qwho{flex:1;min-width:150px;font-size:13.5px;font-weight:600}',
     '.reqtime{font-weight:400;font-size:11.5px;color:var(--muted-2);white-space:nowrap;',
     '  margin-left:6px}',
+    '.tname{font-family:var(--f-head);font-size:14.5px}',
+    '.tsess{display:flex;gap:12px;padding:4px 0;font-size:13px;flex-wrap:wrap}',
 
     /* ------------------------------------------------------ week grid */
     '.wkwrap{min-width:940px}',
@@ -631,8 +633,69 @@
     '  .daychip{min-width:54px}',
 
     /* The month bar has to wrap instead of pushing This month off the edge. */
-    '  .mbar{flex-wrap:wrap;gap:10px;padding-top:12px;padding-bottom:12px}',
-    '  .mnav{flex-wrap:wrap;gap:8px}',
+    '  .mbar{flex-wrap:wrap;gap:10px;padding-top:10px;padding-bottom:10px}',
+    /* ‹ October 2026 › and This month on one row: the button had been
+       dropping to a line of its own on every month screen. */
+    '  .mnav{flex-wrap:nowrap;gap:6px;width:100%}',
+    '  .mnav .mtitle{white-space:nowrap}',
+    '  .mnav [data-thismonth]{margin-left:auto;padding:0 10px}',
+
+    /* A name is one thing: it does not break between first and last. The
+       request time goes under it instead of beside it. */
+    '  .qwho{white-space:nowrap;min-width:auto;font-size:11.5px}',
+    '  .qrow > .row-actions{flex-basis:100%}',
+    '  .reqtime{display:block;margin-left:0;font-size:9.5px}',
+    '  .tname{font-size:12px;white-space:nowrap}',
+    '  .tsess{font-size:11px;gap:8px}',
+    '  .tsess{row-gap:2px;align-items:center}',
+    '  .tsess > span:first-child{flex-basis:100%}',
+    '  .tsess > span:nth-child(2){min-width:0 !important}',
+
+    /* Second pass on the scale, about 15% across the board: lettering only.
+       Heights of everything tappable stay where they were. */
+    '  :host{font-size:11px}',
+    '  .page-title{font-size:14px}',
+    '  .page-sub{font-size:9.5px}',
+    '  .card-title{font-size:11px}',
+    '  .row-t{font-size:11px}',
+    '  .row-s{font-size:9.5px}',
+    '  .stat-k{font-size:15px}',
+    '  .stat-l{font-size:8px}',
+    '  .mtitle{font-size:12px}',
+    '  .pill{height:18px;padding:0 6px;font-size:8.5px}',
+    '  .btn{font-size:9px}',
+    '  .btn-sm{font-size:8.5px}',
+    '  .vseg button{font-size:10px}',
+    '  .label{font-size:8px}',
+    '  .note-line{font-size:9.5px}',
+    '  .empty{font-size:10.5px}',
+    '  .qname{font-size:12.5px}',
+    '  .qmeta{font-size:10.5px}',
+    '  .daychip{font-size:9.5px}',
+    '  .timechip{font-size:11px}',
+    '  .hcell,.hedit{font-size:10px}',
+    '  .selbar-t{font-size:11.5px}',
+    '  .flash-in{font-size:11.5px}',
+    '  .ag-day{font-size:8.5px}',
+    '  .ag-none{font-size:11px}',
+    '  .ag-t b,.ag-m b{font-size:11px}',
+    '  .ag-t span,.ag-m span{font-size:10px}',
+    '  .fdtot .big{font-size:14px}',
+    '  .wkh{font-size:9.5px}',
+    '  .wkh i{font-size:10px}',
+    '  .fdd b{font-size:11.5px}',
+    '  .fdt{font-size:10px}',
+    '  .fdn{font-size:11px}',
+    '  .fdn small{font-size:9.5px}',
+    '  .fdh{font-size:10px}',
+    '  .fdx{font-size:11.5px}',
+    '  .fdx dt{font-size:10px}',
+    '  .dchip .d{font-size:8.5px}',
+    '  .dev .n{font-size:10px}',
+    '  .dev .c{font-size:9.5px}',
+    '  .tbl{font-size:11px}',
+    '  .tbl td.fd-day{font-size:13px}',
+    '  .avatar{width:24px !important;height:24px !important;font-size:9px !important}',
     /* Colour keys are a desktop luxury: the row itself says what it is. */
     '  .legend{display:none}',
     /* The schedule card keeps only its count, and that moves next to the
@@ -1703,8 +1766,11 @@
           ' value="' + hrs(i.hours) + '"' +
           ' aria-label="Hours worked on ' + esc(i.name) + ' ' + esc(i.date) + '"> h' +
           (changed ? '<em>plan ' + hrs(i.plannedHours) + '</em>' : '') + '</span>';
-      } else {
+      } else if (i.kind === 'shift') {
         hoursCell = '<span class="hcell">' + hrs(i.hours) + ' h</span>';
+      } else {
+        /* Every class is an hour, so a figure on each row says nothing. */
+        hoursCell = '';
       }
 
       return '<div class="' + cls.join(' ') + '"' +
@@ -1744,7 +1810,8 @@
             '<div class="dotcol" style="background:' + esc(s.ownerColour || '#B9B9C6') + '"></div>' +
             '<div class="row-main"><div class="row-t">' + esc(s.name) + '</div>' +
             '<div class="row-s">' + esc(fmtShort(s.date)) + ' · ' + esc(s.time) +
-              ' · normally ' + esc(shortName(s.ownerName)) + ' · ' + hrs(s.hours) + ' h' +
+              ' · normally ' + esc(shortName(s.ownerName)) +
+              (s.discipline === 'frontdesk' ? ' · ' + hrs(s.hours) + ' h' : '') +
               (n ? ' · ' + n + (n === 1 ? ' request' : ' requests') : '') + '</div></div>' +
             discPill(s.discipline) +
             '<div class="row-actions">' + (s.myRequest
@@ -2458,13 +2525,12 @@
           out.push('<div class="qblock">' +
             '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">' +
             avatar({ name: p.name, colour: p.colour }, 28) +
-            '<strong style="font-family:var(--f-head);font-size:14.5px">' + esc(p.name) +
+            '<strong class="tname">' + esc(p.name) +
               '</strong>' +
             '<span class="pill pill-neutral">' + p.sessions.length + ' ' +
               (p.sessions.length === 1 ? 'session' : 'sessions') + '</span></div>');
           p.sessions.forEach(function (s) {
-            out.push('<div style="display:flex;gap:12px;padding:4px 0;font-size:13px;' +
-              'flex-wrap:wrap">' +
+            out.push('<div class="tsess">' +
               '<span style="color:var(--muted);min-width:96px">' + esc(fmtShort(s.date)) +
                 ' · ' + esc(s.time) + '</span>' +
               '<span style="flex:1;min-width:160px">' + esc(s.name) + '</span>' +
