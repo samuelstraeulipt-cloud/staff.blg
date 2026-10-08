@@ -683,6 +683,25 @@ ok('a screen that fails hands the tab back', await page.evaluate(() =>
 await page.setViewportSize({ width: 1200, height: 900 });
 await page.waitForTimeout(40);
 
+/* A class SportsNow runs that the plan has no row for yet. It is really
+   happening, so it shows — but with no id there is nothing to hand over, and
+   a tick box that silently does nothing is the failure we keep removing. */
+console.log('\n— a class the plan has no row for —');
+await page.setViewportSize({ width: 1280, height: 900 });
+await set({ view: 'month', me: ME, ym: '2027-03', today: '2027-03-01', totals: { hours: 1 },
+  items: [{ kind: 'class', refId: '', date: '2027-03-20', time: '06:30', name: 'Sunrise Yoga',
+    discipline: '', hours: 1, plannedHours: 1, editableHours: false,
+    state: '', note: '', sessionId: null, requests: 0 }] }, 'ready', '');
+await page.waitForTimeout(60);
+ok('it is on the month', (await page.evaluate(() =>
+  document.querySelector('blg-teamhub-month').shadowRoot.textContent)).includes('Sunrise Yoga'));
+ok('...but cannot be ticked for handover', await page.evaluate(() =>
+  document.querySelector('blg-teamhub-month').shadowRoot
+    .querySelectorAll('[data-pick]').length === 0));
+ok('...and says why', (await page.evaluate(() =>
+  document.querySelector('blg-teamhub-month').shadowRoot.textContent))
+  .includes('Not in the plan yet'));
+
 console.log('\n— errors —');
 ok('no page errors at all', errs.length === 0, errs.slice(0, 4));
 

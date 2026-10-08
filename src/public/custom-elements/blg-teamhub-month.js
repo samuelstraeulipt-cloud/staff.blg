@@ -1669,8 +1669,14 @@
         cls.push('off');
       }
 
+      /* A class SportsNow is running that the plan has no row for yet. Real
+         enough to show — it is happening — but there is no id to hang a
+         handover on, and a tick box that silently does nothing is worse than
+         no tick box. Monday's job gives it a row and the box comes back. */
+      var orphan = i.kind === 'class' && !i.refId;
       var selectable = i.state !== 'covering' && i.state !== 'needsCover' &&
-                       i.state !== 'covered' && i.date >= today;
+                       i.state !== 'covered' && i.date >= today && !orphan;
+      if (orphan && !state) state = '<span class="pill pill-neutral">Not in the plan yet</span>';
       if (picked) cls.push('sel');
 
       var box = selectable

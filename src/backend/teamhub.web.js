@@ -9,8 +9,8 @@ import { Permissions, webMethod } from 'wix-web-module';
 import { currentMember, authentication, members } from 'wix-members-backend';
 import { elevate } from 'wix-auth';
 import wixData from 'wix-data';
-import { snWeek, sameName, mondayOf, addDays, checkSportsNow }
-  from 'backend/sportsnow.js';
+import { snWeek, sameName, mondayOf, addDays, checkSportsNow,
+         classIndex, weeksOfMonth } from 'backend/sportsnow.js';
 
 const OPT = { suppressAuth: true };
 const pad = n => String(n).padStart(2, '0');
@@ -60,6 +60,15 @@ const isOff = v => v === false || v === 0 ||
 
 /* Classes are paid as whole hours — a 55-minute slot counts as 1.00. */
 const billed = mins => Math.max(1, Math.ceil((Number(mins) || 0) / 60));
+
+/* SportsNow names a coach, it does not give an id. One active staff member or
+   nobody: two people the name could mean is a guess, and a guess here hands
+   somebody else's class to the wrong person. */
+function idOfStaffNameIn(staffRows, who) {
+  if (!String(who || '').trim()) return undefined;
+  const hit = staffRows.filter(p => sameName(p.title, who) && !isOff(p.active));
+  return hit.length === 1 ? hit[0]._id : undefined;
+}
 const list = s => String(s || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
 const mail = s => String(s || '').trim().toLowerCase();
 /* A class runs every week on its weekday — unless its `dates` field lists the
@@ -187,8 +196,42 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
   const classes = cRes.items.filter(c => !isOff(c.active));
   const shifts  = sRes.items.filter(s => !isOff(s.active));
 
+  /* The month's classes come from SportsNow. The weeks go out together, the
+     way the weekly check does — five or six round trips one after another
+     would not fit inside a web method. If the feed will not answer, the whole
+     screen fails rather than falling back to the pattern: a month that quietly
+     shows classes nobody is teaching is what we are getting rid of. */
+  const fetched = await Promise.all(weeksOfMonth(ym).map(monday => snWeek(monday)));
+  /* One row per lesson. The weeks do not overlap, so this only matters when
+     the feed repeats itself — but a lesson counted twice is an hour counted
+     twice, and the month is what people read their pay off. */
+  const seenLesson = {}, lessonsOn = {};
+  fetched.forEach(rows => rows.forEach(l => {
+    if (String(l.date).slice(0, 7) !== ym) return;
+    const k = l.snId || `${l.date}|${l.time}|${l.name}`;
+    if (seenLesson[k]) return;
+    seenLesson[k] = 1;
+    (lessonsOn[l.date] = lessonsOn[l.date] || []).push(l);
+  }));
+  Object.keys(lessonsOn).forEach(d => lessonsOn[d]
+    .sort((a, b) => String(a.time).localeCompare(String(b.time))));
+  /* Indexed over every row, switched off ones included, so that `active`
+     still means something: a class an admin has retired is matched and then
+     skipped, rather than going unmatched and reappearing as a class the plan
+     has never heard of. */
+  const classFor = classIndex(cRes.items);
+
   const nameOf = {}, idOfEmail = {};
   stRes.items.forEach(p => { nameOf[p._id] = p.title; idOfEmail[mail(p.email)] = p._id; });
+
+  const idOfStaffName = who => idOfStaffNameIn(stRes.items, who);
+  /* A lesson's own length, when the feed gives both ends of it. */
+  const snMinutes = l => {
+    const m = t => { const q = String(t || '').split(':');
+      return (Number(q[0]) || 0) * 60 + (Number(q[1]) || 0); };
+    const d = m(l.end) - m(l.time);
+    return d > 0 ? d : 0;
+  };
 
   const sessionAt = {};
   seRes.items.forEach(s => { sessionAt[`${s.kind}:${s.refId}:${s.date}`] = s; });
@@ -235,17 +278,35 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
        and the plan is ignored. That matters when a class changes hands in the
        CMS after a handover: going by the plan as well would put a plain, tickable
        row on the *new* coach's month for a date that is already handed over and
-       covered by somebody else. The handover follows the people named on it. */
-    classes.filter(c => classRuns(c, date)).forEach(c => {
-      const sess = sessionAt[`class:${c._id}:${date}`];
-      const owner = idOfEmail[mail(c.coachEmail)];
+       covered by somebody else. The handover follows the people named on it.
+
+       The dates come from SportsNow, not from the weekly pattern. A pattern
+       cannot know that one Saturday had no Pilates, so it invented classes
+       that were not running — eight of them in October alone — and missed the
+       ones added since the plan was imported. This month is the lessons that
+       actually exist, which is the same answer the Schedule gives because it
+       is the same source. `Classes` still says what a class *is*: the id a
+       handover points at, its discipline, how long it is billed for. */
+    (lessonsOn[date] || []).forEach(l => {
+      const c = classFor({ weekday: wd, time: l.time, name: l.name });
+      if (c && isOff(c.active)) return;             // retired on purpose
+      const sess = c ? sessionAt[`class:${c._id}:${date}`] : null;
+      /* Who teaches *this* date, as SportsNow has it — not who usually does.
+         The plan's coach is the fallback for a lesson the studio left
+         unassigned. */
+      const owner = idOfStaffName(l.coach) ||
+        (c ? idOfEmail[mail(c.coachEmail)] : undefined);
       const mine = sess
         ? (sess.ownerId === staff._id || sess.coveredById === staff._id)
         : owner === staff._id;
       if (!mine) return;
-      push({ kind: 'class', refId: c._id, date, time: c.start || '', name: c.title || '',
-             discipline: c.discipline || '', hours: billed(c.minutes),
-             plannedHours: billed(c.minutes), editableHours: false }, sess);
+      /* Billed from the lesson's own length when it has one — a class moved to
+         ninety minutes for a week should be paid as ninety. */
+      const mins = snMinutes(l) || (c ? Number(c.minutes) : 0);
+      push({ kind: 'class', refId: c ? c._id : '', date, time: l.time || '',
+             name: (c && c.title) || l.name || '',
+             discipline: (c && c.discipline) || '', hours: billed(mins),
+             plannedHours: billed(mins), editableHours: false }, sess);
     });
 
     shifts.filter(s => Number(s.weekday) === wd).forEach(s => {
@@ -305,11 +366,27 @@ export const recordAbsences = webMethod(Permissions.SiteMember, async (picks) =>
      both slow and long enough to be cut off partway through, leaving some
      sessions handed over and the person told only that something went wrong. */
   const dates = Object.keys(want.reduce((a, w) => { a[w.date] = 1; return a; }, {}));
-  const [plan, aRes, dupRes] = await Promise.all([
+  /* The weeks the picked class dates fall in. A class may only be handed over
+     on a date SportsNow actually runs it — the same test the month applies, or
+     a coach could see a class on their month and be refused when they try to
+     give it away, which is the sort of disagreement nobody can debug. */
+  const mondays = Object.keys(want.filter(w => w.kind === 'class')
+    .reduce((a, w) => { a[mondayOf(w.date)] = 1; return a; }, {}));
+  const [plan, aRes, dupRes, weeks] = await Promise.all([
     loadPlan(),
     findIn('ShiftAssignments', 'date', dates, 600),
-    findIn('Sessions', 'title', want.map(w => w.title), 100)
+    findIn('Sessions', 'title', want.map(w => w.title), 100),
+    Promise.all(mondays.map(m => snWeek(m)))
   ]);
+
+  /* date -> the Classes row each of that day's lessons belongs to, and who
+     SportsNow says is teaching it. */
+  const lessonFor = {};
+  const matchClass = classIndex(plan.classes);
+  weeks.forEach(rows => rows.forEach(l => {
+    const c = matchClass({ weekday: weekdayOf(l.date), time: l.time, name: l.name });
+    if (c) lessonFor[`${c._id}|${l.date}`] = l;
+  }));
 
   const classOf = {}; plan.classes.forEach(c => { classOf[c._id] = c; });
   const shiftOf = {}; plan.shifts.forEach(s => { shiftOf[s._id] = s; });
@@ -318,17 +395,24 @@ export const recordAbsences = webMethod(Permissions.SiteMember, async (picks) =>
   });
   const already = {}; dupRes.items.forEach(s => { already[s.title] = true; });
 
-  /* Ownership is still decided here against the plan, never against the
-     payload — the only change is that the plan is already in memory. */
+  /* Ownership is decided here, never from the payload. For a class that means
+     SportsNow: it has to be running that day, and the coach it names has to be
+     the person asking. The plan's own coach is the fallback only when the
+     studio left the lesson unassigned. */
   const rows = [];
   want.forEach(w => {
     if (already[w.title]) return;
     const row = w.kind === 'class' ? classOf[w.refId] : shiftOf[w.refId];
-    if (!row || (w.kind === 'class' ? !classRuns(row, w.date)
-                                     : Number(row.weekday) !== weekdayOf(w.date))) return;
-    const owner = w.kind === 'class'
-      ? plan.idOfEmail[mail(row.coachEmail)]
-      : assignAt[`${w.refId}|${w.date}`];
+    if (!row) return;
+    let owner;
+    if (w.kind === 'class') {
+      const l = lessonFor[`${w.refId}|${w.date}`];
+      if (!l) return;                          // not running that day
+      owner = idOfStaffNameIn(plan.staff, l.coach) || plan.idOfEmail[mail(row.coachEmail)];
+    } else {
+      if (Number(row.weekday) !== weekdayOf(w.date)) return;
+      owner = assignAt[`${w.refId}|${w.date}`];
+    }
     if (!owner || owner !== staff._id) return;
     rows.push({ title: w.title, kind: w.kind, refId: w.refId, date: w.date,
       ownerId: staff._id, status: 'open', coveredById: null });

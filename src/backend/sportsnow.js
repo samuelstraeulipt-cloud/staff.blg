@@ -193,6 +193,46 @@ function coachFor(lessons, staff) {
   return { email: tidy(hit[0].email).toLowerCase(), sure: true, named };
 }
 
+/* Which `Classes` row a SportsNow lesson belongs to. Both the weekly check
+   and My Month ask this, and they have to agree: if the job decides a lesson
+   is a new class while the month decides it is an old one, the two screens
+   stop telling the same story.
+
+   The weekday and the time narrow it to a slot; the name decides which class
+   in that slot it is. Taking a lone row in a slot as the answer without
+   looking at the name would be the tidier-looking rule and the wrong one: a
+   genuinely new class put on at an hour that already had one would be
+   swallowed by it and never reach the plan — the silent failure this whole
+   comparison exists to end. Returns null when nothing matches, and the caller
+   decides what that means: the job adds a row, the month shows the lesson
+   anyway because it is really running. */
+export function classIndex(classes) {
+  const atSlot = {};
+  classes.forEach(c => {
+    const k = `${Number(c.weekday)}|${tidy(c.start)}`;
+    (atSlot[k] = atSlot[k] || []).push(c);
+  });
+  return function (slot) {
+    const here = atSlot[`${slot.weekday}|${slot.time}`] || [];
+    return here.filter(c => nameKey(c.title) === nameKey(slot.name))[0] ||
+           here.filter(c => sameClass(c.title, slot.name))[0] || null;
+  };
+}
+
+/* The weeks a month needs, as Mondays — the feed answers a week at a time and
+   a month always straddles five or six of them. */
+export function weeksOfMonth(ym) {
+  const first = `${ym}-01`;
+  const [Y, M] = ym.split('-').map(Number);
+  const lastDay = new Date(Date.UTC(Y, M, 0)).getUTCDate();
+  const last = `${ym}-${pad(lastDay)}`;
+  const out = [];
+  for (let w = mondayOf(first); w <= mondayOf(last); w = addDays(w, 7)) out.push(w);
+  return out;
+}
+
+export { weekdayOf };
+
 export async function syncClasses(live, until, today, silent) {
   const [cRes, sRes] = await Promise.all([
     wixData.query('Classes').limit(500).find(OPT),
@@ -211,26 +251,7 @@ export async function syncClasses(live, until, today, silent) {
     slots[k].lessons.push(l);
   });
 
-  /* The plan, by the slot it occupies. Name is only the tie-breaker: titles
-     drift ("Kettlebell Functional" against the feed's "Kettlebell Functional
-     Fitness") while the weekday and the time do not. */
-  const atSlot = {};
-  classes.forEach(c => {
-    const k = `${Number(c.weekday)}|${tidy(c.start)}`;
-    (atSlot[k] = atSlot[k] || []).push(c);
-  });
-  /* The weekday and the time narrow it to a slot; the name decides which
-     class in that slot it is. Taking a lone row as the answer without
-     looking at the name would be the tidier-looking rule and the wrong one:
-     a genuinely new class put on at an hour that already had one would be
-     swallowed by it and never reach the plan — which is the silent failure
-     this whole comparison exists to end. A name too different to match adds
-     a row, and a wrong extra row is at least a row somebody can see. */
-  function planFor(slot) {
-    const here = atSlot[`${slot.weekday}|${slot.time}`] || [];
-    return here.filter(c => nameKey(c.title) === nameKey(slot.name))[0] ||
-           here.filter(c => sameClass(c.title, slot.name))[0] || null;
-  }
+  const planFor = classIndex(classes);
 
   const firstOfMonth = today.slice(0, 8) + '01';
   const add = [], edit = [], notes = [];

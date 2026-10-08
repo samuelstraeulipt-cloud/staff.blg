@@ -19,6 +19,10 @@ const threw = async (name, fn, code) => {
 
 /* A Tuesday well in the future so nothing is "past". */
 const D1 = '2027-03-02', D2 = '2027-03-09', YM = '2027-03';
+/* One SportsNow lesson, as the feed hands it over. */
+const SN = (id, date, time, name, team) => ({ name, date, time_begin: time,
+  time_end: time.slice(0, 2) + ':55', team, location_name: 'BLG',
+  book_now_link: `https://www.sportsnow.ch/x/service_sessions/${id}/bookings/new` });
 
 function world() {
   reset();
@@ -40,6 +44,11 @@ function world() {
   ]);
   seed('Sessions', []); seed('CoverRequests', []); seed('ShiftOverrides', []); seed('SportsNowTasks', []);
   seed('SnLessons', []); seed('SnChanges', []);
+  /* My Month reads its dates from SportsNow now, not from the weekly pattern,
+     so the little world needs a feed as much as it needs a Classes row. These
+     two lessons are the c1 class actually running on D1 and D2. */
+  setFeed([SN(1, D1, '18:00', 'Group Strength', 'Anna Meier'),
+           SN(2, D2, '18:00', 'Group Strength', 'Anna Meier')]);
   return staff;
 }
 const as = who => setMember({ _id: 'm-' + who, loginEmail: who + '@blg.ch', loginEmailVerified: true });
@@ -58,7 +67,7 @@ ok('duplicate email is loud', (await T.whoAmI()).reason === 'DUPLICATE_STAFF_EMA
 
 console.log('\n— H2: a covered session stays on the owner\'s month —');
 world(); as('anna');
-const baseline = (await T.getMyMonth(YM)).totals.hours;   // 5 classes + 2 shifts
+const baseline = (await T.getMyMonth(YM)).totals.hours;   // 2 lessons + 2 shifts
 await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D1 }]);
 let m = await T.getMyMonth(YM);
 let row = m.items.find(i => i.date === D1 && i.kind === 'class');
@@ -362,16 +371,63 @@ mocks.default.query = name => { const q = realQuery(name); const f = q.find.bind
 await threw('...even when totalCount is missing', () => T.getMyMonth(YM), 'TRUNCATED');
 mocks.default.query = realQuery;
 
-console.log('\n— one-off classes run only on their dates —');
+console.log('\n— the month is the schedule, not a weekly pattern —');
 world(); as('anna');
 db.Classes.push({ _id: 'c9', title: 'HYROX Intro', weekday: 2, start: '10:00', minutes: 55,
   discipline: 'group', coachEmail: 'anna@blg.ch', dates: D2 });
+/* The feed runs the intro class once, and the weekly class on only one of its
+   two Tuesdays — a week off, the thing a pattern can never know about. */
+setFeed([SN(1, D1, '18:00', 'Group Strength', 'Anna Meier'),
+         SN(9, D2, '10:00', 'HYROX Intro', 'Anna Meier')]);
 m = await T.getMyMonth(YM);
-ok('it is on the month on its date', m.items.some(i => i.refId === 'c9' && i.date === D2),
+ok('a class the feed runs once is on the month once',
+  m.items.filter(i => i.refId === 'c9').length === 1 &&
+  m.items.some(i => i.refId === 'c9' && i.date === D2),
   m.items.filter(i => i.refId === 'c9').map(i => i.date));
-ok('...and on no other Tuesday', m.items.filter(i => i.refId === 'c9').length === 1,
-  m.items.filter(i => i.refId === 'c9').map(i => i.date));
-ok('the weekly class still runs every Tuesday', m.items.filter(i => i.refId === 'c1').length === 5);
+ok('a week the class did not run is NOT on the month',
+  !m.items.some(i => i.refId === 'c1' && i.date === D2),
+  m.items.filter(i => i.refId === 'c1').map(i => i.date));
+ok('...and the week it did run is', m.items.some(i => i.refId === 'c1' && i.date === D1));
+ok('nothing is on the month that is not in the feed',
+  m.items.filter(i => i.kind === 'class').length === 2,
+  m.items.filter(i => i.kind === 'class').map(i => i.date + ' ' + i.name));
+
+/* A class running in SportsNow that the plan has no row for yet still shows —
+   it is really happening — but it carries no class id, so there is nothing to
+   hand over until the Monday job gives it one. */
+world(); as('anna');
+setFeed([SN(7, D1, '06:30', 'Sunrise Yoga', 'Anna Meier')]);
+m = await T.getMyMonth(YM);
+const orphan = m.items.find(i => i.kind === 'class' && i.name === 'Sunrise Yoga');
+ok('a lesson with no class row still reaches the coach\'s month', !!orphan, m.items);
+ok('...and carries no id to hand over', orphan && orphan.refId === '', orphan);
+
+/* Who teaches a given date comes from the feed, not from the plan's default. */
+world(); as('bea');
+setFeed([SN(1, D1, '18:00', 'Group Strength', 'Bea Lang')]);
+m = await T.getMyMonth(YM);
+ok('a stand-in named by SportsNow gets the class on her month',
+  m.items.some(i => i.refId === 'c1' && i.date === D1), m.items);
+as('anna'); m = await T.getMyMonth(YM);
+ok('...and it is off the usual coach\'s month that week',
+  !m.items.some(i => i.refId === 'c1' && i.date === D1), m.items);
+
+/* A class switched off in the CMS stays off even if SportsNow runs it. */
+world(); as('anna');
+db.Classes.find(c => c._id === 'c1').active = false;
+m = await T.getMyMonth(YM);
+ok('a retired class does not come back through the feed',
+  !m.items.some(i => i.kind === 'class'), m.items.filter(i => i.kind === 'class'));
+
+/* And if SportsNow will not answer, the month says so rather than guessing. */
+world(); as('anna');
+setFeed(new Error('down'));
+await threw('a month with no feed', () => T.getMyMonth(YM), 'SPORTSNOW_UNREACHABLE');
+/* The built schedule and recordAbsences still read the weekly pattern, so the
+   dated row has to be back in the plan for these. */
+world(); as('anna');
+db.Classes.push({ _id: 'c9', title: 'HYROX Intro', weekday: 2, start: '10:00', minutes: 55,
+  discipline: 'group', coachEmail: 'anna@blg.ch', dates: D2 });
 let wk = await T.getWeek(D1);
 ok('the schedule leaves it out of a week it does not run',
   !JSON.stringify(wk).includes('HYROX Intro'));
@@ -380,6 +436,28 @@ ok('...and shows it in the week it does', JSON.stringify(wk).includes('HYROX Int
 await T.recordAbsences([{ kind: 'class', refId: 'c9', date: D1 }]);
 ok('an absence on a date it does not run records nothing',
   !db.Sessions.some(x => x.refId === 'c9'), db.Sessions);
+
+/* Handing a class over has to agree with the month about which dates exist,
+   or a coach sees a class, taps "can't make it", and nothing happens. */
+console.log('\n— a handover follows the schedule too —');
+world(); as('anna');
+setFeed([SN(1, D2, '18:00', 'Group Strength', 'Anna Meier')]);   // D1 off that week
+await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D1 }]);
+ok('a date the feed does not run cannot be handed over', db.Sessions.length === 0, db.Sessions);
+await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D2 }]);
+ok('...and the date it does run can', db.Sessions.length === 1, db.Sessions);
+
+world(); as('bea');
+setFeed([SN(1, D1, '18:00', 'Group Strength', 'Bea Lang')]);     // Bea is standing in
+await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D1 }]);
+ok('the coach SportsNow names may hand the class over, not just the plan\'s',
+  db.Sessions.length === 1 && db.Sessions[0].ownerId === 'bea', db.Sessions);
+as('anna');
+world(); as('anna');
+setFeed([SN(1, D1, '18:00', 'Group Strength', 'Bea Lang')]);
+await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D1 }]);
+ok('...and the usual coach may not, on a week she is not teaching it',
+  db.Sessions.length === 0, db.Sessions);
 
 console.log('\n— SportsNow to-dos follow who actually teaches —');
 world(); as('anna');
