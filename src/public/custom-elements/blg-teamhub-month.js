@@ -1112,6 +1112,13 @@
       if (el.dataset.snday)  { this._snDay = Number(el.dataset.snday); this._render(); return; }
       if (el.dataset.fdrow) { this._fdToggle(el.dataset.fdrow, el); return; }
 
+      if (el.dataset.fdclose) {
+        var fc = el.dataset.fdclose.split('|');
+        this._emit('teamhub:closeshift',
+          { shiftId: fc[0], date: fc[1], closed: fc[2] === '1' });
+        return;
+      }
+
       if (el.dataset.req) {
         this._emit('teamhub:request', { sessionId: el.dataset.req, kind: el.dataset.kind });
         return;
@@ -1664,6 +1671,9 @@
       } else if (i.state === 'covered') {
         state = '<span class="pill pill-ok">' + esc(shortName(i.note)) + ' covering</span>';
         cls.push('off');
+      } else if (i.state === 'closed') {
+        state = '<span class="pill pill-neutral">kein Frontdesk</span>';
+        cls.push('off');
       } else if (i.state === 'done' || i.date < today) {
         state = '<span class="pill pill-neutral">Done</span>';
         cls.push('off');
@@ -1675,7 +1685,8 @@
          no tick box. Monday's job gives it a row and the box comes back. */
       var orphan = i.kind === 'class' && !i.refId;
       var selectable = i.state !== 'covering' && i.state !== 'needsCover' &&
-                       i.state !== 'covered' && i.date >= today && !orphan;
+                       i.state !== 'covered' && i.state !== 'closed' &&
+                       i.date >= today && !orphan;
       if (orphan && !state) state = '<span class="pill pill-neutral">Not in the plan yet</span>';
       if (picked) cls.push('sel');
 
@@ -1896,6 +1907,23 @@
         out.push('<div class="note-line">Worth a nudge in the group chat — whoever is away ' +
           'can open the session and copy the message again. If they can make it after all, ' +
           '<strong>Cancel handover</strong> puts it back on their month.</div></div>');
+      }
+
+      var unstaffed = d.unstaffed || [];
+      if (unstaffed.length) {
+        out.push('<div class="card" style="margin-bottom:16px"><div class="card-head">' +
+          '<h2 class="card-title">Kein Frontdesk — ' + esc(monthName) + '</h2>' +
+          '<span class="pill pill-neutral">' + unstaffed.length + '</span></div>');
+        unstaffed.forEach(function (s) {
+          out.push('<div class="row">' +
+            '<div class="dotcol" style="background:var(--line-2)"></div>' +
+            '<div class="row-main"><div class="row-t">' + esc(s.name) + '</div>' +
+            '<div class="row-s">' + esc(fmtShort(s.date)) + ' · ' + esc(s.time) +
+              ' · normally ' + esc(shortName(s.ownerName)) + '</div></div>' +
+            '<span class="pill pill-neutral">Nobody was on it</span></div>');
+        });
+        out.push('<div class="note-line">Handed over, nobody covered it, and the day has ' +
+          'gone — so the desk was simply empty. Nothing left to decide.</div></div>');
       }
 
       if (covered.length) {
@@ -2142,6 +2170,16 @@
         '<dt>Status</dt><dd>' + esc(gap ? 'Nobody on it'
           : ((r.status && r.status.text) || '')) + '</dd></dl>' +
         '<div class="fdf"><span>Who</span>' + who + '</div>' +
+        (d.canEdit && !r.past
+          ? '<div class="fdf"><span>Closed</span>' +
+            '<button class="btn ' + (r.closed ? 'btn-primary' : 'btn-quiet') + ' btn-sm"' +
+            ' data-fdclose="' + esc(key) + '|' + (r.closed ? '0' : '1') + '">' +
+            (r.closed ? 'Nobody on it ✓' : 'kein Frontdesk') + '</button>' +
+            '<span style="font-size:12.5px;color:var(--muted)">' +
+            (r.closed ? 'Settled — nobody is being asked to cover it.'
+                      : 'Say now that the desk stays empty that day.') +
+            '</span></div>'
+          : '') +
         '<div class="fdf"><span>Hours</span>' + hoursBox +
         '<span style="font-size:12.5px;color:var(--muted)">plan ' +
         hrs(r.plannedHours) + ' h</span></div></div>';

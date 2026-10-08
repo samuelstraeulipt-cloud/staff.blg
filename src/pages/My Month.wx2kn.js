@@ -25,7 +25,7 @@ import {
   getOpenBoard, requestCover, withdrawRequest,
   getAdminQueue, assignCover, declineRequest, unassignCover, cancelHandover,
   markSportsNowDone,
-  getFrontDesk, setShiftStaff, importShiftPlan, getSportsNowWeek, checkSportsNowNow,
+  getFrontDesk, setShiftStaff, setShiftClosed, importShiftPlan, getSportsNowWeek, checkSportsNowNow,
   getWeek, getTeamAbsences
 } from 'backend/teamhub.web';
 
@@ -203,6 +203,11 @@ $w.onReady(async function () {
   el.on('teamhub:setshift', (event) => act(
     () => setShiftStaff(event.detail.shiftId, event.detail.date, event.detail.staffId),
     'Shift updated.'));
+
+  /* An admin deciding in advance that the desk stays empty that day. */
+  el.on('teamhub:closeshift', (event) => act(
+    () => setShiftClosed(event.detail.shiftId, event.detail.date, event.detail.closed),
+    event.detail.closed ? 'Kein Frontdesk.' : 'Back on the plan.'));
 
   /* Front desk plan from Excel: a check shows what would change without
      writing; the import writes and reloads the month. */

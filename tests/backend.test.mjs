@@ -442,6 +442,75 @@ ok('an absence on a date it does not run records nothing',
 /* Alessia has no email. Indexing staff by email put her under the key '' —
    and then every unstaffed shift and every class with no coach resolved to
    her. Setting a shift to "kein Frontdesk" showed her standing at it. */
+/* Nobody on the desk: decided in advance, or decided by the day going past. */
+console.log('\n— kein Frontdesk —');
+world(); as('cara');
+await T.setShiftClosed('s1', D1, true);
+let fdc = await T.getFrontDesk(YM);
+let rowc = fdc.rows.find(x => x.date === D1 && x.shiftId === 's1');
+ok('a shift closed in advance reads kein Frontdesk',
+  rowc && rowc.status.text === 'kein Frontdesk' && rowc.closed === true, rowc && rowc.status);
+ok('...in the settled colour, not the one that wants attention',
+  rowc && rowc.status.tone === 'neutral', rowc && rowc.status);
+ok('...and nobody is credited with its hours — only her other shift counts',
+  (fdc.totals.find(t => t.id === 'anna') || {}).n === 1, fdc.totals);
+as('anna');
+const fdOb = await T.getOpenBoard();
+ok('...and it is not offered to anybody to cover',
+  !fdOb.mine.some(x => x.date === D1 && x.kind === 'shift'), fdOb.mine);
+const fdMonth = await T.getMyMonth(YM);
+ok('...while the person who was down for it sees it settled',
+  (fdMonth.items.find(i => i.kind === 'shift' && i.date === D1) || {}).state === 'closed',
+  fdMonth.items.filter(i => i.kind === 'shift'));
+
+as('cara');
+await T.setShiftStaff('s1', D1, 'bea');
+fdc = await T.getFrontDesk(YM);
+rowc = fdc.rows.find(x => x.date === D1 && x.shiftId === 's1');
+ok('putting somebody on it afterwards undoes the decision',
+  rowc && rowc.staffId === 'bea' && !rowc.closed, rowc && rowc.status);
+
+await T.setShiftClosed('s1', D1, true);
+await T.setShiftClosed('s1', D1, false);
+fdc = await T.getFrontDesk(YM);
+ok('and reopening it leaves no session behind',
+  !db.Sessions.some(x => x.title === 'shift:s1:' + D1), db.Sessions);
+as('anna');
+await threw('a coach closing a shift', () => T.setShiftClosed('s1', D1, true), 'NOT_ADMIN');
+
+/* The one Sam asked for: it runs out, and nobody had to close it. */
+world(); as('anna');
+/* Genuinely gone: a Tuesday before today, not merely before the month on
+   screen — the rule is about the day having passed, not the view. */
+const past = (() => { let d = new Date(); d.setUTCDate(d.getUTCDate() - 14);
+  while (d.getUTCDay() !== 2) d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10); })();
+const pastYM = past.slice(0, 7);
+db.ShiftAssignments.push({ title: 's1|' + past, date: past, shiftId: 's1',
+  staffEmail: 'anna@blg.ch' });
+db.Sessions.push({ title: 'shift:s1:' + past, kind: 'shift', refId: 's1', date: past,
+  ownerId: 'anna', status: 'open', coveredById: null });
+as('cara');
+const fp = await T.getFrontDesk(pastYM);
+const rp = fp.rows.find(x => x.date === past && x.shiftId === 's1');
+ok('a handover nobody covered reads kein Frontdesk once the day has gone',
+  rp && rp.status.text === 'kein Frontdesk', rp && rp.status);
+const fdQ1 = await T.getAdminQueue(pastYM);
+ok('...and it is off the admin\'s list of things to decide',
+  !fdQ1.noAsk.some(x => x.date === past) && !fdQ1.queue.some(x => x.date === past),
+  { noAsk: fdQ1.noAsk, queue: fdQ1.queue });
+ok('...and out of the uncovered count', fdQ1.counts.uncovered === 0, fdQ1.counts);
+ok('...but still listed, so an admin can see it happened',
+  fdQ1.unstaffed.some(x => x.date === past), fdQ1.unstaffed);
+
+/* A class nobody covered is still worth knowing about. */
+world(); as('cara');
+db.Sessions.push({ title: 'class:c1:' + past, kind: 'class', refId: 'c1', date: past,
+  ownerId: 'anna', status: 'open', coveredById: null });
+const fdQ2 = await T.getAdminQueue(pastYM);
+ok('a class nobody covered is NOT quietly settled by the date passing',
+  fdQ2.noAsk.some(x => x.date === past) && fdQ2.counts.uncovered === 1, fdQ2.counts);
+
 console.log('\n— a blank email is not a person —');
 world(); as('cara');
 db.Staff.push({ _id: 'blank', title: 'Alessia', email: '', roles: 'frontdesk,coach',

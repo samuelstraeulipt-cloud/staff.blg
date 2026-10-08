@@ -686,6 +686,40 @@ await page.waitForTimeout(40);
 /* A class SportsNow runs that the plan has no row for yet. It is really
    happening, so it shows — but with no id there is nothing to hand over, and
    a tick box that silently does nothing is the failure we keep removing. */
+/* Nobody on the desk, settled rather than outstanding. */
+console.log('\n— kein Frontdesk —');
+await page.setViewportSize({ width: 1280, height: 900 });
+await set({ view: 'month', me: ME, ym: '2027-03', today: '2027-03-01', totals: { hours: 0 },
+  items: [{ kind: 'shift', refId: 's1', date: '2027-03-09', time: '16:00–20:00',
+    name: 'Front desk — Tuesday eve', discipline: 'frontdesk', hours: 4, plannedHours: 4,
+    editableHours: false, state: 'closed', note: '', sessionId: 'z1', requests: 0 }] },
+  'ready', '');
+await page.waitForTimeout(60);
+ok('a settled shift says kein Frontdesk on the month', (await page.evaluate(() =>
+  document.querySelector('blg-teamhub-month').shadowRoot.textContent)).includes('kein Frontdesk'));
+ok('...and cannot be ticked', await page.evaluate(() =>
+  document.querySelector('blg-teamhub-month').shadowRoot.querySelectorAll('[data-pick]').length === 0));
+
+const ADMIN_U = JSON.parse(JSON.stringify(SCREENS.admin));
+ADMIN_U.unstaffed = [{ sessionId: 'z1', name: 'Front desk — Tuesday eve',
+  date: '2027-03-09', time: '16:00–20:00', ownerName: 'Anna Meier' }];
+await set(ADMIN_U, 'ready', '');
+await page.waitForTimeout(60);
+ok('the admin overview lists the ones that settled themselves', (await page.evaluate(() =>
+  document.querySelector('blg-teamhub-month').shadowRoot.textContent)).includes('Nobody was on it'));
+
+const FD_C = JSON.parse(JSON.stringify(FD));
+FD_C.canEdit = true;
+FD_C.rows[0].closed = true;
+FD_C.rows[0].past = false;
+await set(FD_C, 'ready', '');
+await page.waitForTimeout(60);
+await page.evaluate(() => { const sr = document.querySelector('blg-teamhub-month').shadowRoot;
+  const r = sr.querySelector('.fdrow') || sr.querySelector('tbody tr'); if (r) r.click(); });
+await page.waitForTimeout(80);
+ok('an admin can switch a shift back on from the front desk panel', await page.evaluate(() =>
+  !!document.querySelector('blg-teamhub-month').shadowRoot.querySelector('[data-fdclose]')));
+
 console.log('\n— a class the plan has no row for —');
 await page.setViewportSize({ width: 1280, height: 900 });
 await set({ view: 'month', me: ME, ym: '2027-03', today: '2027-03-01', totals: { hours: 1 },

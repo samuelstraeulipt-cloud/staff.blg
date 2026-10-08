@@ -261,7 +261,12 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
   const items = [];
   const push = (row, sess) => {
     let state = 'planned', note = '';
-    if (sess && sess.ownerId === staff._id) {
+    /* Nobody is on the desk that evening and that is the decision, not a gap
+       still to be filled. It is not tickable and it is not waiting on anyone. */
+    if (sess && (sess.status === 'closed' || nobodyCame(sess, today))) {
+      state = 'closed'; note = '';
+    }
+    else if (sess && sess.ownerId === staff._id) {
       state = sess.status === 'covered' ? 'covered' : 'needsCover';
       note = sess.status === 'covered' ? (nameOf[sess.coveredById] || '') : '';
     } else if (sess && sess.coveredById === staff._id) {
@@ -665,6 +670,16 @@ function canCover(staff, kind, discipline) {
   return !d || list(staff.disciplines).includes(d);
 }
 
+/* A front desk shift that was handed over and never covered, on a day that has
+   now passed, is not an open question any more — nobody was on the desk, and
+   that is the answer. It reads as "kein Frontdesk" wherever it appears, with
+   no admin having to go and close it. Classes are left alone: a class that
+   nobody covered is a thing somebody still wants to know about. */
+const nobodyCame = (sess, today) => !!sess && sess.kind === 'shift' &&
+  sess.status === 'open' && sess.date < today;
+const shiftUnstaffed = (sess, today) =>
+  !!sess && sess.kind === 'shift' && (sess.status === 'closed' || nobodyCame(sess, today));
+
 /* The label a session carries on every screen. */
 function describe(kind, row, date) {
   if (kind === 'class') {
@@ -705,6 +720,7 @@ export const getOpenBoard = webMethod(Permissions.SiteMember, async () => {
     if (!row) return;                                   // the plan changed under it
     const d = describe(s.kind, row, s.date);
 
+    if (s.status === 'closed') return;        // settled: nobody is on it, on purpose
     if (s.status === 'covered') {
       covered.push({ date: s.date, time: d.time, name: d.name,
         coveredByName: nameOfRow(plan.byId[s.coveredById]),
@@ -845,10 +861,18 @@ export const getAdminQueue = webMethod(Permissions.SiteMember, async (ym) => {
   const reqBySession = {};
   reqRes.items.forEach(r => { (reqBySession[r.sessionId] = reqBySession[r.sessionId] || []).push(r); });
 
-  const queue = [], noAsk = [], coveredList = [];
+  const queue = [], noAsk = [], coveredList = [], unstaffed = [];
   seRes.items.forEach(s => {
     const row = s.kind === 'class' ? classOf[s.refId] : shiftOf[s.refId];
     if (!row) return;
+    if (shiftUnstaffed(s, today)) {
+      /* Nothing left to decide. It is listed, so an admin can see it happened,
+         but it is not waiting on anybody. */
+      const dd = describe(s.kind, row, s.date);
+      unstaffed.push({ sessionId: s._id, name: dd.name, date: s.date, time: dd.time,
+        ownerName: nameOfRow(plan.byId[s.ownerId]) });
+      return;
+    }
     const d = describe(s.kind, row, s.date);
     /* The session is the truth about who is covering. Without transactions,
        two admins assigning at the same moment can leave an approved request
@@ -884,7 +908,7 @@ export const getAdminQueue = webMethod(Permissions.SiteMember, async (ym) => {
   });
 
   const byWhen = (a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time);
-  queue.sort(byWhen); noAsk.sort(byWhen); coveredList.sort(byWhen);
+  queue.sort(byWhen); noAsk.sort(byWhen); coveredList.sort(byWhen); unstaffed.sort(byWhen);
 
   /* Open SportsNow to-dos, from today on, whatever month is showing: they are
      the keeper's list, not a monthly report. */
@@ -905,9 +929,12 @@ export const getAdminQueue = webMethod(Permissions.SiteMember, async (ym) => {
       .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
   }
 
-  return { me: pub(staff), view: 'admin', ym, today, queue, noAsk, covered: coveredList, sportsnow,
+  return { me: pub(staff), view: 'admin', ym, today, queue, noAsk, covered: coveredList,
+           unstaffed, sportsnow,
     counts: {
-      uncovered: seRes.items.filter(s => s.status === 'open').length,
+      /* Settled ones do not count: neither the ones an admin closed nor the
+         ones the calendar closed by passing. */
+      uncovered: seRes.items.filter(s => s.status === 'open' && !shiftUnstaffed(s, today)).length,
       handed: seRes.items.length
     } };
 });
@@ -1051,7 +1078,11 @@ export const getFrontDesk = webMethod(Permissions.SiteMember, async (ym) => {
       if (sess) actual = sess.status === 'covered' ? sess.coveredById : null;
 
       let status;
-      if (sess && sess.status === 'open') {
+      if (shiftUnstaffed(sess, today)) {
+        /* The same words as a shift nobody was ever put on, in a calmer
+           colour: amber is "still to sort out", grey is "sorted". */
+        status = { tone: 'neutral', text: 'kein Frontdesk' };
+      } else if (sess && sess.status === 'open') {
         status = { tone: 'bad', text: past ? 'Nobody covered' : 'Needs cover' };
       } else if (sess) {
         const n = nameOfRow(plan.byId[sess.coveredById]);
@@ -1078,7 +1109,7 @@ export const getFrontDesk = webMethod(Permissions.SiteMember, async (ym) => {
         /* Who the hours actually count for — the plan, or whoever covered.
            Sent so the screen can redo its own totals when somebody edits a
            number, instead of showing a figure that no longer adds up. */
-        actualId: actual || null,
+        actualId: actual || null, closed: shiftUnstaffed(sess, today),
         status, past, canLogHours: canEdit || actual === staff._id });
     });
   });
@@ -1153,7 +1184,12 @@ async function settleShiftChange(shiftId, date, staffId, title) {
 
   if (sess.items.length) {
     const s = sess.items[0];
-    if (staffId && s.ownerId === staffId) {
+    if (staffId && s.status === 'closed') {
+      /* It was settled as nobody's, and now somebody is on it. The decision is
+         gone, so the record of it goes too — this is a plain planned shift
+         again, not a handover that happens to be covered. */
+      await wixData.remove('Sessions', s._id, OPT);
+    } else if (staffId && s.ownerId === staffId) {
       /* Put back on their own shift — there is nothing left to hand over. */
       const reqs = await wixData.query('CoverRequests')
         .eq('sessionId', s._id).limit(100).find(OPT);
@@ -1204,6 +1240,55 @@ function parsePlanDate(v) {
   return `${Y}-${pad(M)}-${pad(D)}`;
 }
 const codeKey = v => String(v || '').replace(/\./g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/* Deciding, in advance, that nobody is on the desk. The calendar settles a
+   handover that ran out on its own (see `nobodyCame`); this is for saying so
+   before the day arrives — a Saturday the studio is shut, an evening nobody is
+   needed. It is the same answer either way, so it is the same state. */
+export const setShiftClosed = webMethod(Permissions.SiteMember, async (shiftId, date, closed) => {
+  const me = requireAdmin(await requireStaff());
+  if (typeof shiftId !== 'string' || !isDate(date)) throw new Error('BAD_INPUT');
+  const shift = await wixData.get('Shifts', shiftId, OPT);
+  if (!shift || Number(shift.weekday) !== weekdayOf(date)) throw new Error('BAD_INPUT');
+
+  const title = `shift:${shiftId}:${date}`;
+  const found = await wixData.query('Sessions').eq('title', title).limit(1).find(OPT);
+  const sess = found.items[0];
+
+  if (!closed) {
+    /* Reopening only undoes a decision. A handover somebody made is theirs and
+       is not ours to delete from here — that is `cancelHandover`. */
+    if (sess && sess.status === 'closed') await wixData.remove('Sessions', sess._id, OPT);
+    return { ok: true };
+  }
+
+  /* Whoever was down for it keeps their name on the record, so the month can
+     tell them it is off rather than silently dropping the row. */
+  const a = await wixData.query('ShiftAssignments').eq('title', `${shiftId}|${date}`)
+    .limit(1).find(OPT);
+  const planned = a.items.length
+    ? (await loadPlan()).idOfEmail[mail(a.items[0].staffEmail)] : null;
+
+  if (sess) {
+    sess.status = 'closed';
+    sess.coveredById = null;
+    await wixData.update('Sessions', sess, OPT);
+  } else {
+    await wixData.insert('Sessions', { title, kind: 'shift', refId: shiftId, date,
+      ownerId: planned || me._id, status: 'closed', coveredById: null }, OPT);
+  }
+  /* Nobody is being asked any more, so nothing should still be pending. */
+  const id = sess ? sess._id : (await wixData.query('Sessions')
+    .eq('title', title).limit(1).find(OPT)).items[0]._id;
+  const reqs = await wixData.query('CoverRequests').eq('sessionId', id).limit(100).find(OPT);
+  await Promise.all(reqs.items.map(r => wixData.remove('CoverRequests', r._id, OPT)));
+
+  /* Hours logged against a shift nobody worked are not hours. */
+  const ov = await wixData.query('ShiftOverrides').eq('title', `${shiftId}|${date}`)
+    .limit(1).find(OPT);
+  if (ov.items.length) await wixData.remove('ShiftOverrides', ov.items[0]._id, OPT);
+  return { ok: true };
+});
 
 export const importShiftPlan = webMethod(Permissions.SiteMember, async (text, apply) => {
   requireAdmin(await requireStaff());
