@@ -45,7 +45,43 @@ let shown = null;     // the data the element is showing now
    because a write can change screens other than the one in front of you. */
 const seen = new Map();
 let loadSeq = 0;
-const screenKey = () => view + '|' + (ym || '') + '|' + (monday || '');
+const keyFor = v => v + '|' + (ym || '') + '|' + (monday || '');
+const screenKey = () => keyFor(view);
+
+/* Keeping the last answer made coming *back* to a screen instant; the first
+   tap on each one still cost its full second. So once the screen you landed on
+   is up, the rest are fetched quietly behind it, one at a time, and dropped
+   into the same store. By the time anybody reaches for a tab it is usually
+   already there. Nothing here touches the element: a prefetch only fills the
+   store, never paints, and a failure is simply not cached. */
+let warmed = false;
+async function warmOthers(me) {
+  if (warmed) return;
+  warmed = true;
+  const roles = String((me && me.roles) || '').split(',').map(r => r.trim());
+  const admin = roles.includes('admin');
+  const wanted = ['month', 'open', 'team', 'sportsnow']
+    .concat(admin ? ['admin'] : [])
+    .concat(admin || roles.includes('frontdesk') ? ['frontdesk'] : []);
+
+  for (const v of wanted) {
+    if (v === view) continue;                    // already on screen
+    if (seen.has(keyFor(v))) continue;
+    try {
+      const data = await LOADERS[v]();
+      /* Adopt a month or a week the server chose for us only if we have none,
+         so the first tap looks the screen up under the key it was stored at.
+         Never overwrite one the person has arrowed to. */
+      if (data.ym && !ym) ym = data.ym;
+      if (data.monday && !monday) monday = data.monday;
+      seen.set(keyFor(v), data);
+    } catch (e) {
+      /* A screen this person may not open, or a feed that did not answer.
+         Neither is worth saying anything about: the tab still works, it just
+         pays for itself when it is tapped. */
+    }
+  }
+}
 
 /* Each screen is one call. The month screens share `ym`; the schedule has its
    own week, so switching tabs and back keeps you where you were. */
@@ -270,6 +306,8 @@ async function load(note) {
     el.setAttribute('data', JSON.stringify(data));
     el.setAttribute('state', 'ready');
     if (note) el.setAttribute('message', note);
+    /* Not awaited: the screen is up, the rest can arrive in its own time. */
+    warmOthers(data.me);
   } catch (err) {
     if (seq === loadSeq) fail(err);
   } finally {
@@ -289,6 +327,7 @@ async function act(run, note) {
     const said = await run();
     busy = false;
     seen.clear();                 // a write can change more than this screen
+    warmed = false;               // ...so the others are worth fetching again
     await load(typeof said === 'string' ? said : note);
   } catch (err) {
     busy = false;
