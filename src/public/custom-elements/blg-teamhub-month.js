@@ -382,6 +382,33 @@
     '  text-transform:uppercase;color:var(--muted);margin-bottom:10px;display:block}',
     '.hint{font-size:12px;color:var(--muted);margin:14px 0 0;line-height:1.5}',
 
+    /* The group message as a pop-up. A <dialog> opened with showModal() sits in
+       the browser's top layer, above everything on the page, so no Wix wrapper
+       (transforms, overflow, z-index) can strand it off screen the way it can
+       a position:fixed box. Centred on a desktop, a sheet from the bottom on a
+       phone. The box is the inner .wa-box, so a click on the dialog itself is
+       a click on the dimmed backdrop. */
+    '.wa-dlg{border:0;padding:0;margin:auto;background:transparent;max-width:min(520px,calc(100vw - 32px));',
+    '  width:100%;max-height:calc(100dvh - 32px);color:var(--text);font-family:var(--f-body);font-size:14px}',
+    '.wa-dlg::backdrop{background:rgba(11,11,12,.55)}',
+    '.wa-dlg:not([open]){display:none}',
+    '.wa-box{background:#fff;border-radius:20px;padding:22px 22px 18px;box-shadow:0 18px 50px rgba(0,0,0,.25);',
+    '  max-height:calc(100dvh - 32px);overflow:auto;box-sizing:border-box}',
+    '.wa-dlg.wa-in .wa-box{animation:waUp .22s ease-out}',
+    '@keyframes waUp{from{transform:translateY(24px);opacity:0}to{transform:none;opacity:1}}',
+    '.wa-title{font-family:var(--f-head);font-weight:600;font-size:18px;margin:0 0 4px;letter-spacing:-.01em}',
+    '.wa-sub{color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.45}',
+    '.wa-ok{color:var(--green-600)}',
+    '.wa-bad{color:var(--danger)}',
+    '.wa-box .wa{max-height:38vh;overflow:auto}',
+    '.wa-box .wa-actions .btn{flex:1 1 auto}',
+    '.wa-wait{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:13px;padding:6px 0 4px}',
+    '.wa-spin{width:16px;height:16px;border-radius:50%;border:2px solid var(--line);',
+    '  border-top-color:var(--black);animation:waSpin .8s linear infinite}',
+    '@keyframes waSpin{to{transform:rotate(360deg)}}',
+    '.wa-list{margin:0 0 4px;padding:0;list-style:none;font-size:13.5px}',
+    '.wa-list li{padding:3px 0}',
+
     /* ----------------------------------------------------------- tables */
     '.scroller{overflow-x:auto}',
     '.tbl{width:100%;border-collapse:collapse;font-size:13.5px;min-width:620px}',
@@ -706,6 +733,11 @@
 
     '  .wide-only{display:none}',
     '  .narrow-only{display:block}',
+    '  .wa-dlg{margin:auto 0 0;max-width:100vw;width:100vw}',
+    '  .wa-box{border-radius:20px 20px 0 0;padding:20px 16px calc(16px + env(safe-area-inset-bottom))}',
+    '  .wa-title{font-size:16px}',
+    '  .wa-box .wa{font-size:12px;padding:14px 16px}',
+    '  .wa-box .wa-actions .btn{flex:1 1 100%}',
     '  .dock{display:grid;position:sticky;bottom:0;z-index:40;background:var(--black);',
     '    border-top:1px solid #1E2125;padding:6px 4px calc(8px + env(safe-area-inset-bottom,0px))}',
 
@@ -1006,6 +1038,10 @@
       this._data = null;
       this._sel = {};            // key -> {kind, refId, date}
       this._share = null;        // array of items whose message is being shown
+      this._shareState = null;   // 'saving' | 'ready' | 'failed' — the pop-up's state
+      this._shareFrom = null;    // 'record' | 'message' — which button opened it
+      this._shareMissed = 0;     // picks that did not save, when some did
+      this._shareAnim = false;   // slide in once, not on every redraw
       this._confirm = null;      // sessionId whose cancel is one click from real
       this._authMode = null;     // 'login' | 'access' on the sign-in screen
       this._authEmail = '';      // kept across redraws; the password never is
@@ -1063,6 +1099,7 @@
          the box you had just typed into was destroyed and replaced with the
          old number. */
       if (name === 'message') {
+        if (this._share) this._syncShare();
         if (this._patchFlash(newV || '', this.getAttribute('state'))) return;
       }
       if (name === 'data' && newV) {
@@ -1074,6 +1111,12 @@
           this._confirm = null;  // and no half-pressed buttons
           this._authMode = null; // the page decides which sign-in screen comes next
           this._sending = null;  // the answer is in: the tapped button is done
+          if (this._shareState === 'saving' && this._data && this._data.view === 'month') {
+            this._settleShare(this._data);
+          } else if (!this._data || this._data.view !== 'month') {
+            this._share = null;    // signed out, or another screen: the pop-up goes
+            this._shareState = null;
+          }
         } catch (e) {
           this._data = null;
         }
@@ -1083,7 +1126,10 @@
       if (name === 'data' || (name === 'state' && newV !== 'loading')) {
         this._pending = null;
       }
-      if (name === 'state' && newV === 'error') this._sending = null;
+      if (name === 'state' && newV === 'error') {
+        this._sending = null;
+        if (this._shareState === 'saving') this._shareState = 'failed';
+      }
       this._render();
     }
 
@@ -1159,16 +1205,16 @@
 
       var d = this._data;
 
-      if (el.dataset.ym) { this._share = null; this._emit('teamhub:month', { ym: el.dataset.ym }); return; }
+      if (el.dataset.ym) { this._closeShare(); this._emit('teamhub:month', { ym: el.dataset.ym }); return; }
       if (el.dataset.thismonth && d) {
-        this._share = null;
+        this._closeShare();
         this._emit('teamhub:month', { ym: String(d.today).slice(0, 7) });
         return;
       }
       if (el.dataset.week) { this._emit('teamhub:week', { monday: el.dataset.week }); return; }
       if (el.dataset.thisweek) { this._emit('teamhub:week', { monday: '' }); return; }
       if (el.dataset.go) {
-        this._share = null; this._sel = {}; this._more = false;
+        this._closeShare(); this._sel = {}; this._more = false;
         /* A screen costs a round trip. Light the tapped tab now, so the tap
            answers immediately; the screen already on display stays until the
            new one arrives, which is quieter than flashing a placeholder. */
@@ -1224,8 +1270,14 @@
       if (el.dataset.record) {
         var picks = Object.keys(this._sel).map(function (k) { return this._sel[k]; }, this);
         if (!picks.length) return;
-        /* Keep the details so the message can be shown straight after. */
+        /* Keep the details so the message can be shown straight after. The
+           pop-up opens now, saying it is recording, and fills in once the
+           fresh month confirms what was actually saved. */
         this._share = picks.map(function (p) { return p._item; });
+        this._shareState = 'saving';
+        this._shareFrom = 'record';
+        this._shareMissed = 0;
+        this._shareAnim = true;
         this._sel = {};
         this._emit('teamhub:absences', {
           picks: picks.map(function (p) {
@@ -1243,11 +1295,16 @@
         var found = (d.items || []).filter(function (i) {
           return i.kind + ':' + i.refId + ':' + i.date === key;
         });
+        if (!found.length) return;
         this._share = found;
-        this._render();
+        this._shareState = 'ready';
+        this._shareFrom = 'message';
+        this._shareMissed = 0;
+        this._shareAnim = true;
+        this._syncShare();
         return;
       }
-      if (el.dataset.closeshare) { this._share = null; this._render(); return; }
+      if (el.dataset.closeshare) { this._closeShare(); return; }
 
       /* Cancelling is two clicks: arm, then confirm. Arming another row disarms
          the first, so only one button is ever live at a time. */
@@ -1490,6 +1547,121 @@
       this.shadowRoot.innerHTML =
         '<style>' + CSS + '</style><div class="app">' + chrome + body + bar + '</div>';
       this._markSending();
+      this._syncShare();
+    }
+
+    /* ------------------------------------------------ the group message */
+
+    /* The fresh month says what was really saved: a pick that now reads
+       "needs cover" went out. Only those go into the message, so nobody asks
+       the group to cover a session TeamHub never recorded. */
+    _settleShare(d) {
+      var fresh = {};
+      (d.items || []).forEach(function (i) {
+        if (i.state === 'needsCover') fresh[i.kind + ':' + i.refId + ':' + i.date] = i;
+      });
+      var ok = (this._share || []).map(function (i) {
+        return fresh[i.kind + ':' + i.refId + ':' + i.date];
+      }).filter(Boolean);
+      this._shareMissed = (this._share || []).length - ok.length;
+      if (ok.length) { this._share = ok; this._shareState = 'ready'; }
+      else this._shareState = 'failed';
+    }
+
+    _closeShare() {
+      this._share = null;
+      this._shareState = null;
+      this._shareFrom = null;
+      this._shareMissed = 0;
+      var dlg = this.shadowRoot && this.shadowRoot.getElementById('waDlg');
+      if (dlg) {
+        try { if (dlg.open) dlg.close(); } catch (e) { /* already closed */ }
+        if (dlg.parentNode) dlg.parentNode.removeChild(dlg);
+      }
+    }
+
+    /* Draws the pop-up into a <dialog> at the end of the shadow root and opens
+       it. A full redraw replaces the shadow root's contents, dialog included,
+       so this runs after every redraw; it only slides in the first time. */
+    _syncShare() {
+      if (!this.shadowRoot) return;
+      var dlg = this.shadowRoot.getElementById('waDlg');
+      var d = this._data;
+      if (!this._share || !this._share.length || !d || d.view !== 'month') {
+        if (dlg && dlg.parentNode) {
+          try { if (dlg.open) dlg.close(); } catch (e) { /* already closed */ }
+          dlg.parentNode.removeChild(dlg);
+        }
+        return;
+      }
+      var self = this;
+      if (!dlg) {
+        dlg = document.createElement('dialog');
+        dlg.id = 'waDlg';
+        dlg.className = 'wa-dlg';
+        dlg.setAttribute('aria-labelledby', 'waTitle');
+        /* Escape closes it, and so does a tap on the dimmed page around it. */
+        dlg.addEventListener('cancel', function (e) { e.preventDefault(); self._closeShare(); });
+        dlg.addEventListener('click', function (e) { if (e.target === dlg) self._closeShare(); });
+        this.shadowRoot.appendChild(dlg);
+      }
+      if (this._shareAnim) dlg.classList.add('wa-in');
+      dlg.innerHTML = this._shareBox();
+      if (!dlg.open) {
+        try { dlg.showModal(); } catch (e) { dlg.setAttribute('open', ''); }
+      }
+      if (this._shareAnim) {
+        this._shareAnim = false;
+        setTimeout(function () { dlg.classList.remove('wa-in'); }, 300);
+      }
+    }
+
+    _shareBox() {
+      var items = this._share || [];
+      var st = this._shareState;
+      var n = items.length;
+      var s = function (k) { return k + ' session' + (k === 1 ? '' : 's'); };
+      var list = '<ul class="wa-list">' + items.map(function (i) {
+        return '<li>' + esc(fmtShort(i.date)) + ' · ' + esc(i.time) + ' — ' + esc(i.name) + '</li>';
+      }).join('') + '</ul>';
+      var close = '<button class="btn btn-quiet" data-closeshare="1">Close</button>';
+
+      if (st === 'saving') {
+        return '<div class="wa-box" role="document">' +
+          '<h2 class="wa-title" id="waTitle">Recording your absence…</h2>' + list +
+          '<div class="wa-wait"><span class="wa-spin"></span>Saving — the message for the ' +
+          'group appears here in a moment.</div>' +
+          '<div class="wa-actions">' + close + '</div></div>';
+      }
+      if (st === 'failed') {
+        var why = this.getAttribute('message') ||
+          'Something went wrong. Reload the page and try again.';
+        return '<div class="wa-box" role="document">' +
+          '<h2 class="wa-title wa-bad" id="waTitle">Nothing was recorded</h2>' +
+          '<p class="wa-sub">' + esc(why) + '</p>' + list +
+          '<div class="wa-actions">' + close + '</div></div>';
+      }
+      var text = waText(items);
+      var head = this._shareFrom === 'record'
+        ? '<h2 class="wa-title" id="waTitle"><span class="wa-ok">✓</span> ' +
+            (n === 1 ? 'Recorded' : s(n) + ' recorded') + ' — now tell the team</h2>' +
+          '<p class="wa-sub">Send this to the BLG group so somebody picks ' +
+            (n === 1 ? 'it' : 'them') + ' up.' +
+            (this._shareMissed ? ' ' + s(this._shareMissed) + ' could not be recorded and ' +
+              (this._shareMissed === 1 ? 'is' : 'are') + ' not in the message.' : '') + '</p>'
+        : '<h2 class="wa-title" id="waTitle">Message for the group chat</h2>' +
+          '<p class="wa-sub">Send this to the BLG group so somebody picks ' +
+            (n === 1 ? 'it' : 'them') + ' up.</p>';
+      return '<div class="wa-box" role="document">' + head +
+        '<div class="wa" id="waText">' + esc(text) + '</div>' +
+        '<div class="wa-actions">' +
+          '<a class="btn btn-primary" target="_blank" rel="noopener" href="https://wa.me/?text=' +
+            encodeURIComponent(text) + '">Open WhatsApp</a>' +
+          '<button class="btn btn-dark" data-copy="1">Copy message</button>' +
+          close +
+        '</div>' +
+        '<p class="hint">Only people cleared for that kind of session will see it on their ' +
+        'open board, so you won’t get offers from someone who can’t teach it.</p></div>';
     }
 
     /* A tapped button answers at once. The save behind it takes a second or
@@ -1689,21 +1861,7 @@
          hours figure has to move the number above it without a full redraw. */
       out.push('<div class="stats" data-statscard="1">' + this._monthStats(d) + '</div>');
 
-      /* ------------------------------------------- the group chat message */
-      if (this._share && this._share.length) {
-        out.push('<div class="card card-pad" style="margin-bottom:16px">' +
-          '<span class="label">Message for the group chat</span>' +
-          '<div class="wa" id="waText">' + esc(waText(this._share)) + '</div>' +
-          '<div class="wa-actions">' +
-            '<button class="btn btn-primary" data-copy="1">Copy message</button>' +
-            '<a class="btn btn-dark" target="_blank" rel="noopener" href="https://wa.me/?text=' +
-              encodeURIComponent(waText(this._share)) + '">Open WhatsApp</a>' +
-            '<button class="btn btn-quiet" data-closeshare="1">Close</button>' +
-          '</div>' +
-          '<p class="hint">Paste it into the BLG group. Only people cleared for that kind of ' +
-          'session will see it on their open board, so you won’t get offers from someone ' +
-          'who can’t teach it.</p></div>');
-      }
+      /* The group chat message is a pop-up now: see _syncShare. */
 
       /* ------------------------------------------------------- the month */
       out.push('<div class="card" style="margin-bottom:16px">');

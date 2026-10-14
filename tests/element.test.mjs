@@ -783,6 +783,99 @@ await page.waitForTimeout(30);
 ok('...until the fresh screen replaces it', await page.evaluate(() =>
   !document.querySelector('blg-teamhub-month').shadowRoot.querySelector('.is-sending')));
 
+console.log('\n— the group message is a pop-up you cannot miss —');
+{
+  const MD = st => ({ view: 'month', me: ME, ym: '2027-03', today: '2027-03-01',
+    items: Array.from({ length: 18 }, (_, k) => {
+      const day = String(k + 2).padStart(2, '0');
+      const out = st && st[day];
+      return { kind: 'class', refId: 'c' + day, date: '2027-03-' + day, time: '18:00',
+        name: 'Group Strength', discipline: 'group', hours: 1, plannedHours: 1,
+        editableHours: false, state: out ? 'needsCover' : 'planned', note: '',
+        sessionId: out ? 'x' + day : null, selectable: !out, requests: 0 };
+    }), totals: { hours: 18 } });
+  const sr = 'document.querySelector("blg-teamhub-month").shadowRoot';
+  const dlg = () => page.evaluate(`(() => { const d = ${sr}.getElementById('waDlg');
+    if (!d) return null; const r = d.querySelector('.wa-box').getBoundingClientRect();
+    return { open: d.open, modal: d.matches(':modal'), title: (d.querySelector('.wa-title') || {}).textContent,
+      text: (d.querySelector('#waText') || {}).textContent || '', wa: !!d.querySelector('a[href^="https://wa.me/"]'),
+      top: r.top, bottom: r.bottom, vh: innerHeight }; })()`);
+  const tap = q => page.evaluate(`(() => { const n = ${sr}.querySelector('${q}'); n.scrollIntoView({ block: 'center' }); n.click(); })()`);
+  const absences = [];
+  await page.evaluate(() => document.querySelector('blg-teamhub-month')
+    .addEventListener('teamhub:absences', e => window.noteAbs && window.noteAbs(e.detail)));
+  await page.exposeFunction('noteAbs', e => absences.push(e));
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await set(MD(null), 'ready', '');
+  await tap('[data-pick="class:c16:2027-03-16"]');
+  await tap('[data-record]');
+  await page.waitForTimeout(350);          // past the slide-in
+  let w = await dlg();
+  ok('Record absence opens a pop-up at once, saying it is recording',
+    w && w.open && w.modal && /Recording/.test(w.title), w);
+  ok('...on screen even when scrolled to the bottom of a long month',
+    w && w.top >= 0 && w.bottom <= w.vh + 1, w);
+  ok('...and the absence is still sent', absences.length === 1 && absences[0].picks.length === 1, absences);
+
+  /* what the page does: loading, then the fresh month, then the banner */
+  await set(null, 'loading', null);
+  await page.waitForTimeout(30);
+  ok('it stays open while the page reloads', (await dlg() || {}).open === true);
+  await set(MD({ 16: 1 }), 'ready', null);
+  await set(null, null, '1 session recorded — the team can see it on the board now.');
+  await page.waitForTimeout(40);
+  w = await dlg();
+  ok('once saved it shows the WhatsApp message', w && /Recorded/.test(w.title) &&
+    /Dear colleagues/.test(w.text) && /16 Mar|Tue 16/.test(w.text) && w.wa, w);
+
+  await tap('[data-closeshare]');
+  await page.waitForTimeout(30);
+  ok('Close closes it', !(await dlg()));
+
+  /* nothing saved: no message inviting cover for a session nobody recorded */
+  await tap('[data-pick="class:c17:2027-03-17"]');
+  await tap('[data-record]');
+  await set(null, 'loading', null);
+  await set(MD({ 16: 1 }), 'ready', null);
+  await set(null, null, 'Nothing was saved. 1 session could not be handed over: SportsNow does not show it as yours on that date.');
+  await page.waitForTimeout(40);
+  w = await dlg();
+  ok('a recording that saved nothing says so, and offers no message',
+    w && /Nothing was recorded/.test(w.title) && !w.wa && !w.text, w);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(30);
+  ok('Escape closes it', !(await dlg()));
+
+  /* the backend threw */
+  await tap('[data-pick="class:c18:2027-03-18"]');
+  await tap('[data-record]');
+  await set(null, 'error', 'SportsNow isn’t answering right now.');
+  await page.waitForTimeout(40);
+  w = await dlg();
+  ok('an error while recording shows in the pop-up', w && /Nothing was recorded/.test(w.title), w);
+  await tap('[data-closeshare]');
+
+  /* the Message button under Waiting for cover */
+  await set(MD({ 16: 1 }), 'ready', '');
+  await tap('[data-msg="class:c16:2027-03-16"]');
+  await page.waitForTimeout(350);
+  w = await dlg();
+  ok('Message opens the same pop-up with the text', w && w.open && /Dear colleagues/.test(w.text) &&
+    w.top >= 0 && w.bottom <= w.vh + 1, w);
+  await page.evaluate(`${sr}.getElementById('waDlg').dispatchEvent(new MouseEvent('click', { bubbles: true }))`);
+  await page.waitForTimeout(30);
+  ok('a tap on the dimmed page around it closes it', !(await dlg()));
+
+  /* signed out with it open: it must not come back for the next person */
+  await tap('[data-msg="class:c16:2027-03-16"]');
+  await set({ view: 'login' }, 'ready', '');
+  await set(MD({ 16: 1 }), 'ready', '');
+  await page.waitForTimeout(30);
+  ok('it does not survive a sign-out', !(await dlg()));
+  await page.setViewportSize({ width: 1280, height: 720 });
+}
+
 console.log('\n— errors —');
 ok('no page errors at all', errs.length === 0, errs.slice(0, 4));
 
