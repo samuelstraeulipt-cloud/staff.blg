@@ -15,6 +15,7 @@
    support email says, and a cancelled lesson simply drops out of the feed,
    which is why "gone" is treated as a cancellation below.
    ========================================================================== */
+/* global globalThis */
 import wixData from 'wix-data';
 import { fetch } from 'wix-fetch';
 
@@ -54,7 +55,7 @@ export function mondayOf(ds) {
 
 /* One week, as SportsNow has it. Throws rather than returning half a week:
    a schedule that is quietly missing its afternoon is worse than an error. */
-export async function snWeek(monday) {
+async function fetchWeek(monday) {
   let rows;
   try {
     const res = await fetch(`${SN_URL}?date=${monday}`, { method: 'post',
@@ -62,9 +63,72 @@ export async function snWeek(monday) {
     if (!res.ok) throw new Error('status ' + res.status);
     rows = await res.json();
   } catch (e) {
+    console.error('snWeek: SportsNow did not answer for ' + monday + ' — ' + (e && e.message));
     throw new Error('SPORTSNOW_UNREACHABLE');
   }
-  if (!Array.isArray(rows)) throw new Error('SPORTSNOW_UNREACHABLE');
+  if (!Array.isArray(rows)) {
+    console.error('snWeek: SportsNow answered ' + monday + ' with something that is not a list');
+    throw new Error('SPORTSNOW_UNREACHABLE');
+  }
+  return rows;
+}
+
+/* An empty answer is the dangerous one: it looks like a quiet week, so a
+   coach's whole month comes back blank with nothing saying anything went
+   wrong, and a handover is refused as "not running that day". That is the
+   most likely reading of what staff saw on 12 October. So an empty week is
+   checked against the last snapshot the Monday job took: if SportsNow had
+   lessons in that week then, the empty answer is asked for once more and,
+   if it is still empty, treated as a failure. A week the snapshot has nothing
+   for — the past, or a closure — is believed. */
+async function snapshotHas(monday) {
+  try {
+    const res = await wixData.query('SnLessons').ge('date', monday)
+      .le('date', addDays(monday, 6)).limit(1).find(OPT);
+    return res.items.length > 0;
+  } catch (e) {
+    return false;            // no store yet: nothing to compare against
+  }
+}
+
+/* Every screen of every person used to fetch its weeks afresh — about ten
+   calls each time somebody opened the app, all from the same server. The
+   answers are kept for a short while and shared, and two screens asking for
+   the same week at the same moment share one call. Errors are never kept. */
+const WEEK_TTL_MS = 90 * 1000;
+const weekCache = new Map();          // monday -> { at, rows } | { promise }
+const ttl = () => (typeof globalThis !== 'undefined' &&
+  typeof globalThis.__SN_CACHE_MS === 'number') ? globalThis.__SN_CACHE_MS : WEEK_TTL_MS;
+
+async function loadWeek(monday) {
+  let rows = await fetchWeek(monday);
+  if (!rows.length && await snapshotHas(monday)) {
+    rows = await fetchWeek(monday);
+    if (!rows.length) {
+      console.error('snWeek: SportsNow answered ' + monday + ' with no lessons, but the snapshot has some');
+      throw new Error('SPORTSNOW_EMPTY');
+    }
+  }
+  return rows;
+}
+
+export async function snWeek(monday) {
+  const now = Date.now(), keep = ttl();
+  const hit = keep > 0 ? weekCache.get(monday) : null;
+  let rows;
+  if (hit && hit.rows && now - hit.at < keep) rows = hit.rows;
+  else if (hit && hit.promise) rows = await hit.promise;
+  else {
+    const promise = loadWeek(monday);
+    if (keep > 0) weekCache.set(monday, { promise });
+    try {
+      rows = await promise;
+      if (keep > 0) weekCache.set(monday, { at: Date.now(), rows });
+    } catch (e) {
+      weekCache.delete(monday);
+      throw e;
+    }
+  }
 
   return rows.map(r => {
     const date = tidy(r.date);
@@ -221,6 +285,9 @@ export function classIndex(classes) {
 
 /* The weeks a month needs, as Mondays — the feed answers a week at a time and
    a month always straddles five or six of them. */
+/* A lesson is a series (SportsNow's id) on a date. */
+const lessonKey = l => `${l.snId}|${l.date}`;
+
 export function weeksOfMonth(ym) {
   const first = `${ym}-01`;
   const [Y, M] = ym.split('-').map(Number);
@@ -317,12 +384,14 @@ export async function checkSportsNow(silent) {
      single row was written. */
   const fetched = await Promise.all(weeks.map(monday => snWeek(monday)));
 
-  /* One row per lesson id. The weeks do not overlap, so this only matters
-     when the feed repeats itself — but a lesson counted twice would be
-     compared against itself and reported as a change that never happened. */
+  /* One row per lesson. SportsNow's id belongs to the series — every week of
+     a weekly class has the same one — so a lesson is the series on a date.
+     Keyed on the id alone, four weeks of a class collapsed into one, the
+     snapshot held one row per class, and a class reappearing a week later was
+     reported as "moved". */
   const byId = {};
   fetched.forEach(rows => rows.forEach(l => {
-    if (l.snId && l.date >= today && l.date <= until) byId[l.snId] = l;
+    if (l.snId && l.date >= today && l.date <= until) byId[lessonKey(l)] = l;
   }));
   const live = Object.keys(byId).map(id => byId[id])
     .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
@@ -343,27 +412,32 @@ export async function checkSportsNow(silent) {
      plan as "new" would be noise, and writing a change row per lesson would
      take longer than a web method is allowed — so the first run only takes
      the picture. */
-  const baseline = res.items.length === 0;
+  /* A snapshot written before lessons were keyed by date (titles without a
+     "|") cannot be compared with this one: every row would read as cancelled
+     and every lesson as new. It is replaced quietly, like a first run. */
+  const baseline = res.items.length === 0 ||
+    !res.items.some(r => String(r.title || '').includes('|'));
 
   const changes = [], fresh = [], updates = [], gone = [];
   live.forEach(l => {
-    const old = was[l.snId];
-    const row = { title: l.snId, date: l.date, time: l.time, name: l.name, coach: l.coach };
+    const key = lessonKey(l);
+    const old = was[key];
+    const row = { title: key, snId: l.snId, date: l.date, time: l.time, name: l.name, coach: l.coach };
     if (!old) {
-      if (!baseline) changes.push({ kind: 'added', lesson: l,
+      if (!baseline) changes.push({ kind: 'added', key, lesson: l,
         text: `New: ${l.name}, ${l.date} ${l.time}${l.coach ? ` — ${l.coach}` : ''}` });
       fresh.push(row);
       return;
     }
-    delete was[l.snId];
-    if (old.date !== l.date || old.time !== l.time) {
-      changes.push({ kind: 'moved', lesson: l,
+    delete was[key];
+    if (old.time !== l.time) {
+      changes.push({ kind: 'moved', key, lesson: l,
         text: `Moved: ${l.name}, ${old.date} ${old.time} → ${l.date} ${l.time}` });
     } else if (tidy(old.coach) !== tidy(l.coach)) {
-      changes.push({ kind: 'coach', lesson: l,
+      changes.push({ kind: 'coach', key, lesson: l,
         text: `${l.name}, ${l.date} ${l.time}: ${old.coach || 'nobody'} → ${l.coach || 'nobody'}` });
     } else if (tidy(old.name) !== tidy(l.name)) {
-      changes.push({ kind: 'renamed', lesson: l,
+      changes.push({ kind: 'renamed', key, lesson: l,
         text: `Renamed: ${old.name} → ${l.name}, ${l.date} ${l.time}` });
     } else {
       return;                                   // nothing to say about this one
@@ -374,10 +448,32 @@ export async function checkSportsNow(silent) {
   /* Whatever is left in `was` is no longer in the feed — cancelled. */
   Object.keys(was).forEach(id => {
     const old = was[id];
-    changes.push({ kind: 'cancelled', lesson: old,
-      text: `Cancelled: ${old.name}, ${old.date} ${old.time}${old.coach ? ` — ${old.coach}` : ''}` });
     gone.push(old._id);
+    if (baseline) return;                       // an old-style row, not a cancellation
+    changes.push({ kind: 'cancelled', key: id, lesson: old,
+      text: `Cancelled: ${old.name}, ${old.date} ${old.time}${old.coach ? ` — ${old.coach}` : ''}` });
   });
+
+  /* A lesson that went from one date to another shows up as one cancelled and
+     one new in the same series. When that is all that happened to the series,
+     it is reported as what it is: moved. */
+  const bySeries = {};
+  changes.forEach((c, i) => {
+    if (c.kind !== 'added' && c.kind !== 'cancelled') return;
+    const sid = String(c.key || '').split('|')[0];
+    if (!sid) return;
+    (bySeries[sid] = bySeries[sid] || { added: [], cancelled: [] })[c.kind].push(i);
+  });
+  const drop = {};
+  Object.keys(bySeries).forEach(sid => {
+    const g = bySeries[sid];
+    if (g.added.length !== 1 || g.cancelled.length !== 1) return;
+    const nu = changes[g.added[0]], old = changes[g.cancelled[0]];
+    changes[g.added[0]] = { kind: 'moved', key: nu.key, lesson: nu.lesson,
+      text: `Moved: ${nu.lesson.name}, ${old.lesson.date} ${old.lesson.time} → ${nu.lesson.date} ${nu.lesson.time}` };
+    drop[g.cancelled[0]] = true;
+  });
+  for (let i = changes.length - 1; i >= 0; i--) if (drop[i]) changes.splice(i, 1);
 
   /* Then the other comparison: not "what moved since last week" but "what is
      running that the plan has never heard of". */
@@ -393,7 +489,7 @@ export async function checkSportsNow(silent) {
        that is the field's type; sorting still works, ISO sorts as dates do. */
     const at = new Date().toISOString();
     const rows = changes.map(c => ({
-      title: `${c.lesson.snId || c.lesson.title}|${c.kind}|${today}`,
+      title: `${c.key || c.lesson.snId || c.lesson.title}|${c.kind}|${today}`,
       kind: c.kind, text: c.text, date: c.lesson.date, at }));
     if (rows.length) {
       const seen = await wixData.query('SnChanges')

@@ -736,6 +736,53 @@ ok('...and says why', (await page.evaluate(() =>
   document.querySelector('blg-teamhub-month').shadowRoot.textContent))
   .includes('Not in the plan yet'));
 
+console.log('\n— test sandbox —');
+const shadowHas = sel => page.evaluate(q =>
+  !!document.querySelector('blg-teamhub-month').shadowRoot.querySelector(q), sel);
+await set(Object.assign({}, ADMIN, { noAsk: [Object.assign({}, ADMIN.noAsk[0], { test: true })] }), 'ready', '');
+await page.waitForTimeout(40);
+ok('a test session is marked TEST in Admin', await shadowHas('[data-test]'));
+await set(ADMIN, 'ready', '');
+await page.waitForTimeout(40);
+ok('...and a real one is not', !(await shadowHas('[data-test]')));
+await set({ view: 'month', me: Object.assign({}, ME, { test: true, mirrors: 'Anna Meier' }),
+  ym: '2027-03', today: '2027-03-01', items: [], totals: { hours: 0 } }, 'ready', '');
+await page.waitForTimeout(40);
+ok('a test account says whose classes it is shown', await page.evaluate(() =>
+  /Anna Meier/.test(document.querySelector('blg-teamhub-month').shadowRoot
+    .querySelector('[data-testbanner]').textContent)));
+/* A screen whose data cannot be drawn shows a message, not an endless loading card. */
+const errsBefore = errs.length;
+await set({ view: 'admin', me: ME, ym: '2027-03', queue: [null] }, 'ready', '');
+await page.waitForTimeout(40);
+ok('a screen that cannot be drawn says so', await page.evaluate(() =>
+  /could not be shown/.test(document.querySelector('blg-teamhub-month').shadowRoot.textContent)));
+errs.length = errsBefore;          // the console.error above is the point, not a fault
+
+console.log('\n— a tapped button answers at once —');
+await set({ view: 'admin', me: ME, ym: '2027-03', today: '2027-03-01',
+  queue: [{ sessionId: 'q1', name: 'Group Strength', date: '2027-03-02', time: '18:00',
+    ownerName: 'Anna Meier', status: 'open',
+    requests: [{ requestId: 'r9', name: 'Bea Lang', colour: '#123456', kind: 'want', at: Date.now(), approved: false }] }],
+  noAsk: [], covered: [], counts: { uncovered: 1, handed: 1 } }, 'ready', '');
+await page.waitForTimeout(40);
+await page.evaluate(() => document.querySelector('blg-teamhub-month').shadowRoot.querySelector('[data-assign="r9"]').click());
+const assignBtn = () => page.evaluate(() => {
+  const b = document.querySelector('blg-teamhub-month').shadowRoot.querySelector('[data-assign="r9"]');
+  return b ? { text: b.textContent, off: b.hasAttribute('disabled'), dim: !!b.closest('.is-sending') } : null;
+});
+let tb = await assignBtn();
+ok('Assign says it is on its way the moment it is tapped', tb && /Assigning/.test(tb.text) && tb.off && tb.dim, tb);
+await page.evaluate(() => document.querySelector('blg-teamhub-month').setAttribute('state', 'loading'));
+await page.waitForTimeout(30);
+tb = await assignBtn();
+ok('...and still does while the page is loading', tb && /Assigning/.test(tb.text), tb);
+await set({ view: 'admin', me: ME, ym: '2027-03', today: '2027-03-01', queue: [], noAsk: [], covered: [],
+  counts: { uncovered: 0, handed: 1 } }, 'ready', '');
+await page.waitForTimeout(30);
+ok('...until the fresh screen replaces it', await page.evaluate(() =>
+  !document.querySelector('blg-teamhub-month').shadowRoot.querySelector('.is-sending')));
+
 console.log('\n— errors —');
 ok('no page errors at all', errs.length === 0, errs.slice(0, 4));
 

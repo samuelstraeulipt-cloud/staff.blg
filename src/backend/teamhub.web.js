@@ -173,8 +173,44 @@ async function requireStaff() {
 const isAdmin = s => list(s.roles).includes('admin');
 const pub = s => ({
   id: s._id, name: s.title || '', first: (s.title || '').split(' ')[0],
-  roles: list(s.roles), disciplines: list(s.disciplines), colour: safeColour(s.colour)
+  roles: list(s.roles), disciplines: list(s.disciplines), colour: safeColour(s.colour),
+  test: isTest(s), mirrors: isTest(s) ? String(s.mirrors || '') : ''
 });
+
+/* ------------------------------------------------------------- test sandbox
+   A test account (role `test`) is a coach who does not exist for anyone else.
+   Its `mirrors` field names a real coach, and the test account is shown that
+   coach's live SportsNow classes as its own, so the whole handover flow can be
+   tried on a real-looking month. Everything it creates lives in its own world:
+     - its sessions are titled `test|…`, so they never collide with a real
+       handover of the same class on the same date;
+     - real staff never see them — not on their month, the board, the admin
+       queue or team absences — so the mirrored coach's month is untouched;
+     - only an admin who also has the role `tester` sees them in Admin, marked
+       TEST, to assign them; and they never create a SportsNow to-do.
+   A test account sees only test sessions, so it cannot pick up a real class;
+   the tester is the one who asks to cover a test handover and assigns it, so
+   the whole loop can be run with one test account and one admin. */
+const isTest = s => list(s && s.roles).includes('test');
+const isTester = s => list(s && s.roles).includes('tester');
+function testIdsOf(rows) {
+  const o = {};
+  rows.forEach(p => { if (isTest(p)) o[p._id] = true; });
+  return o;
+}
+/* Board, admin queue, team absences: a tester sees both worlds. */
+const visibleTo = (viewer, testIds) => s => {
+  const t = !!testIds[s.ownerId] || !!testIds[s.coveredById];
+  if (isTest(viewer)) return t;
+  return t ? isTester(viewer) : true;
+};
+/* A month is one world only: a tester's own month stays real. */
+const sameWorld = (viewer, testIds) => s =>
+  isTest(viewer) === (!!testIds[s.ownerId] || !!testIds[s.coveredById]);
+const isTestSession = s => /^test\|/.test(String((s && s.title) || ''));
+/* Whose classes this account is shown: the coach it mirrors, or itself. */
+const classOwnerFor = (staff, rows) =>
+  (isTest(staff) && staff.mirrors && idOfStaffNameIn(rows, staff.mirrors)) || staff._id;
 
 /* ------------------------------------------------------------------ month */
 export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
@@ -204,11 +240,16 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
   const fetched = await Promise.all(weeksOfMonth(ym).map(monday => snWeek(monday)));
   /* One row per lesson. The weeks do not overlap, so this only matters when
      the feed repeats itself — but a lesson counted twice is an hour counted
-     twice, and the month is what people read their pay off. */
+     twice, and the month is what people read their pay off.
+     The key is the date, time and name — never SportsNow's id on its own:
+     that id belongs to the *series*, so every Tuesday of a weekly class
+     carries the same one. Keying on it kept only the first Tuesday of the
+     month and threw the rest away, which is why coaches saw their first week
+     and then nothing (October 2026: Valérie, Tanja, Zeliha, Alessandra). */
   const seenLesson = {}, lessonsOn = {};
   fetched.forEach(rows => rows.forEach(l => {
     if (String(l.date).slice(0, 7) !== ym) return;
-    const k = l.snId || `${l.date}|${l.time}|${l.name}`;
+    const k = `${l.date}|${l.time}|${l.name}`;
     if (seenLesson[k]) return;
     seenLesson[k] = 1;
     (lessonsOn[l.date] = lessonsOn[l.date] || []).push(l);
@@ -233,6 +274,9 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
   });
 
   const idOfStaffName = who => idOfStaffNameIn(stRes.items, who);
+  const testIds = testIdsOf(stRes.items);
+  const sessions = seRes.items.filter(sameWorld(staff, testIds));
+  const asId = classOwnerFor(staff, stRes.items);
   /* A lesson's own length, when the feed gives both ends of it. */
   const snMinutes = l => {
     const m = t => { const q = String(t || '').split(':');
@@ -242,7 +286,7 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
   };
 
   const sessionAt = {};
-  seRes.items.forEach(s => { sessionAt[`${s.kind}:${s.refId}:${s.date}`] = s; });
+  sessions.forEach(s => { sessionAt[`${s.kind}:${s.refId}:${s.date}`] = s; });
   const overrideAt = {};
   oRes.items.forEach(o => { overrideAt[`${o.shiftId}|${o.date}`] = o.hours; });
   const assignAt = {};
@@ -251,7 +295,7 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
   /* How many people have put a hand up for each session, so someone who has
      handed a class over can see whether anyone has yet without leaving the
      screen. Declined requests do not count — they are no longer on offer. */
-  const sessIds = seRes.items.map(s => s._id);
+  const sessIds = sessions.map(s => s._id);
   const reqRes = await findIn('CoverRequests', 'sessionId', sessIds, 600);
   const reqCount = {};
   reqRes.items.forEach(r => {
@@ -311,7 +355,7 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
         (c ? idOfEmail[mail(c.coachEmail)] : undefined);
       const mine = sess
         ? (sess.ownerId === staff._id || sess.coveredById === staff._id)
-        : owner === staff._id;
+        : owner === asId;
       if (!mine) return;
       /* Billed from the lesson's own length when it has one — a class moved to
          ninety minutes for a week should be paid as ninety. */
@@ -367,12 +411,12 @@ export const recordAbsences = webMethod(Permissions.SiteMember, async (picks) =>
   for (const p of picks) {
     if (!p || (p.kind !== 'class' && p.kind !== 'shift')) continue;
     if (!isDate(p.date) || typeof p.refId !== 'string' || p.date < today) continue;
-    const title = `${p.kind}:${p.refId}:${p.date}`;
+    const title = (isTest(staff) ? 'test|' : '') + `${p.kind}:${p.refId}:${p.date}`;
     if (seen[title]) continue;                       // the same slot sent twice
     seen[title] = true;
     want.push({ kind: p.kind, refId: p.refId, date: p.date, title });
   }
-  if (!want.length) return { created: 0 };
+  if (!want.length) return { created: 0, asked: 0, refused: {} };
 
   /* Three reads for the whole batch. Validating pick by pick meant four to six
      round trips each — a month's worth of holiday was several hundred, which is
@@ -412,28 +456,36 @@ export const recordAbsences = webMethod(Permissions.SiteMember, async (picks) =>
      SportsNow: it has to be running that day, and the coach it names has to be
      the person asking. The plan's own coach is the fallback only when the
      studio left the lesson unassigned. */
+  /* Every pick that is not saved is counted with its reason, so the screen can
+     say what happened. It used to drop them silently and then report the
+     ones it had kept — or, when it had kept none, claim they were "already
+     handed over", which read as success to someone whose handover had in
+     fact gone nowhere. */
+  const asId = classOwnerFor(staff, plan.staff);
+  const refused = { already: 0, notRunning: 0, notYours: 0, unknown: 0 };
   const rows = [];
   want.forEach(w => {
-    if (already[w.title]) return;
+    if (already[w.title]) { refused.already++; return; }
     const row = w.kind === 'class' ? classOf[w.refId] : shiftOf[w.refId];
-    if (!row) return;
+    if (!row) { refused.unknown++; return; }
     let owner;
     if (w.kind === 'class') {
       const l = lessonFor[`${w.refId}|${w.date}`];
-      if (!l) return;                          // not running that day
+      if (!l) { refused.notRunning++; return; }          // not running that day
       owner = idOfStaffNameIn(plan.staff, l.coach) || plan.idOfEmail[mail(row.coachEmail)];
     } else {
-      if (Number(row.weekday) !== weekdayOf(w.date)) return;
+      if (Number(row.weekday) !== weekdayOf(w.date)) { refused.notRunning++; return; }
       owner = assignAt[`${w.refId}|${w.date}`];
     }
-    if (!owner || owner !== staff._id) return;
+    if (!owner || owner !== asId) { refused.notYours++; return; }
     rows.push({ title: w.title, kind: w.kind, refId: w.refId, date: w.date,
       ownerId: staff._id, status: 'open', coveredById: null });
   });
-  if (!rows.length) return { created: 0 };
+  if (!rows.length) return { created: 0, asked: want.length, refused };
 
   const res = await wixData.bulkInsert('Sessions', rows, OPT);
-  return { created: res && typeof res.inserted === 'number' ? res.inserted : rows.length };
+  return { created: res && typeof res.inserted === 'number' ? res.inserted : rows.length,
+           asked: want.length, refused };
 });
 
 /* Undoing is refused once cover is assigned — doing it silently would strand
@@ -708,14 +760,16 @@ export const getOpenBoard = webMethod(Permissions.SiteMember, async () => {
 
   const seRes = await findAll(wixData.query('Sessions')
     .ge('date', today).le('date', horizon).ascending('date'), 600);
-  const ids = seRes.items.map(s => s._id);
+  const testIds = testIdsOf(plan.staff);
+  const sessions = seRes.items.filter(visibleTo(staff, testIds));
+  const ids = sessions.map(s => s._id);
   const reqRes = await findIn('CoverRequests', 'sessionId', ids, 600);
 
   const reqBySession = {};
   reqRes.items.forEach(r => { (reqBySession[r.sessionId] = reqBySession[r.sessionId] || []).push(r); });
 
   const mine = [], covered = [];
-  seRes.items.forEach(s => {
+  sessions.forEach(s => {
     const row = s.kind === 'class' ? classOf[s.refId] : shiftOf[s.refId];
     if (!row) return;                                   // the plan changed under it
     const d = describe(s.kind, row, s.date);
@@ -733,6 +787,7 @@ export const getOpenBoard = webMethod(Permissions.SiteMember, async () => {
     const reqs = (reqBySession[s._id] || []).filter(r => r.status !== 'declined');
     const own = reqs.find(r => r.staffId === staff._id);
     mine.push({ sessionId: s._id, kind: s.kind, refId: s.refId, date: s.date,
+      test: isTestSession(s),
       time: d.time, name: d.name, discipline: d.discipline, hours: d.hours,
       ownerName: nameOfRow(plan.byId[s.ownerId]),
       ownerColour: colourOf(plan.byId[s.ownerId]),
@@ -767,6 +822,9 @@ export const requestCover = webMethod(Permissions.SiteMember, async (sessionId, 
   if (!canCover(staff, s.kind, describe(s.kind, row, s.date).discipline)) {
     throw new Error('NOT_CLEARED');
   }
+  /* A test session can be asked for only by a tester (the test account cannot
+     ask for its own), and a test account cannot ask for a real one. */
+  if (isTestSession(s) ? !isTester(staff) : isTest(staff)) throw new Error('NOT_FOUND');
 
   /* One request per person per session — asking twice just changes your mind. */
   const title = `${sessionId}|${staff._id}`;
@@ -819,6 +877,7 @@ const isSnKeeper = s => list(s.roles).includes('sportsnow');
 
 async function syncSportsNow(session, targetId) {
   if (!session || session.kind !== 'class') return;
+  if (isTestSession(session)) return;          // a test never reaches SportsNow
   const key = `class:${session.refId}:${session.date}`;
   const found = await wixData.query('SportsNowTasks').eq('title', key).limit(1).find(OPT);
   const t = found.items[0];
@@ -855,14 +914,15 @@ export const getAdminQueue = webMethod(Permissions.SiteMember, async (ym) => {
 
   const seRes = await findAll(
     wixData.query('Sessions').startsWith('date', ym).ascending('date'), 600);
-  const ids = seRes.items.map(s => s._id);
+  const sessions = seRes.items.filter(visibleTo(staff, testIdsOf(plan.staff)));
+  const ids = sessions.map(s => s._id);
   const reqRes = await findIn('CoverRequests', 'sessionId', ids, 600);
 
   const reqBySession = {};
   reqRes.items.forEach(r => { (reqBySession[r.sessionId] = reqBySession[r.sessionId] || []).push(r); });
 
   const queue = [], noAsk = [], coveredList = [], unstaffed = [];
-  seRes.items.forEach(s => {
+  sessions.forEach(s => {
     const row = s.kind === 'class' ? classOf[s.refId] : shiftOf[s.refId];
     if (!row) return;
     if (shiftUnstaffed(s, today)) {
@@ -884,7 +944,8 @@ export const getAdminQueue = webMethod(Permissions.SiteMember, async (ym) => {
         ? { ...r, status: 'pending' } : r);
     const undecided = all.some(r => r.status === 'pending');
     const base = { sessionId: s._id, name: d.name, date: s.date, time: d.time,
-                   ownerName: nameOfRow(plan.byId[s.ownerId]), status: s.status };
+                   ownerName: nameOfRow(plan.byId[s.ownerId]), status: s.status,
+                   test: isTestSession(s) };
 
     /* A session stays in the queue while ANY request on it is undecided, so
        assigning one person never silently disposes of the others. */
@@ -934,8 +995,8 @@ export const getAdminQueue = webMethod(Permissions.SiteMember, async (ym) => {
     counts: {
       /* Settled ones do not count: neither the ones an admin closed nor the
          ones the calendar closed by passing. */
-      uncovered: seRes.items.filter(s => s.status === 'open' && !shiftUnstaffed(s, today)).length,
-      handed: seRes.items.length
+      uncovered: sessions.filter(s => s.status === 'open' && !shiftUnstaffed(s, today)).length,
+      handed: sessions.length
     } };
 });
 
@@ -1570,9 +1631,11 @@ export const getTeamAbsences = webMethod(Permissions.SiteMember, async (ym) => {
 
   const seRes = await findAll(
     wixData.query('Sessions').startsWith('date', ym).ascending('date'), 600);
+  /* The team's picture: a test session appears here only for a tester. */
+  const sessions = seRes.items.filter(visibleTo(staff, testIdsOf(plan.staff)));
 
   const byPerson = {};
-  seRes.items.forEach(s => {
+  sessions.forEach(s => {
     const row = s.kind === 'class' ? classOf[s.refId] : shiftOf[s.refId];
     if (!row) return;
     const d = describe(s.kind, row, s.date);
@@ -1586,5 +1649,5 @@ export const getTeamAbsences = webMethod(Permissions.SiteMember, async (ym) => {
       a.date.localeCompare(b.date) || a.time.localeCompare(b.time))
   })).sort((a, b) => a.name.localeCompare(b.name));
 
-  return { me: pub(staff), view: 'team', ym, total: seRes.items.length, people };
+  return { me: pub(staff), view: 'team', ym, total: sessions.length, people };
 });

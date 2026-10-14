@@ -412,6 +412,8 @@
     '.reqtime{font-weight:400;font-size:11.5px;color:var(--muted-2);white-space:nowrap;',
     '  margin-left:6px}',
     '.tname{font-family:var(--f-head);font-size:14.5px}',
+    '.is-sending{opacity:.55;pointer-events:none;transition:opacity .15s}',
+    '[data-sending]{opacity:1}',
     '.tsess{display:flex;gap:12px;padding:4px 0;font-size:13px;flex-wrap:wrap}',
 
     /* ------------------------------------------------------ week grid */
@@ -737,6 +739,11 @@
     return '<span class="avatar" style="width:' + size + 'px;height:' + size + 'px;' +
       'font-size:' + Math.round(size * 0.36) + 'px;background:' + esc(c) + ';' +
       'color:' + ink(c) + '">' + esc(initials(me.name)) + '</span>';
+  }
+
+  /* Sessions made by a test account; only a tester ever sees one. */
+  function testTag(s) {
+    return s && s.test ? ' <span class="pill pill-warn" data-test="1">TEST</span>' : '';
   }
 
   function discPill(d) {
@@ -1066,6 +1073,7 @@
           this._fdOpen = null;   // and no shift is left hanging open
           this._confirm = null;  // and no half-pressed buttons
           this._authMode = null; // the page decides which sign-in screen comes next
+          this._sending = null;  // the answer is in: the tapped button is done
         } catch (e) {
           this._data = null;
         }
@@ -1075,6 +1083,7 @@
       if (name === 'data' || (name === 'state' && newV !== 'loading')) {
         this._pending = null;
       }
+      if (name === 'state' && newV === 'error') this._sending = null;
       this._render();
     }
 
@@ -1183,14 +1192,15 @@
       }
 
       if (el.dataset.req) {
+        this._sendingFor(el, 'Sending…');
         this._emit('teamhub:request', { sessionId: el.dataset.req, kind: el.dataset.kind });
         return;
       }
-      if (el.dataset.withdraw) { this._emit('teamhub:withdraw', { sessionId: el.dataset.withdraw }); return; }
-      if (el.dataset.assign)   { this._emit('teamhub:assign',   { requestId: el.dataset.assign }); return; }
-      if (el.dataset.decline)  { this._emit('teamhub:decline',  { requestId: el.dataset.decline }); return; }
-      if (el.dataset.unassign) { this._emit('teamhub:unassign', { sessionId: el.dataset.unassign }); return; }
-      if (el.dataset.sndone)   { this._emit('teamhub:sndone',   { taskId: el.dataset.sndone }); return; }
+      if (el.dataset.withdraw) { this._sendingFor(el, 'Withdrawing…'); this._emit('teamhub:withdraw', { sessionId: el.dataset.withdraw }); return; }
+      if (el.dataset.assign)   { this._sendingFor(el, 'Assigning…'); this._emit('teamhub:assign',   { requestId: el.dataset.assign }); return; }
+      if (el.dataset.decline)  { this._sendingFor(el, 'Declining…'); this._emit('teamhub:decline',  { requestId: el.dataset.decline }); return; }
+      if (el.dataset.unassign) { this._sendingFor(el, 'Changing…'); this._emit('teamhub:unassign', { sessionId: el.dataset.unassign }); return; }
+      if (el.dataset.sndone)   { this._sendingFor(el, 'Saving…'); this._emit('teamhub:sndone',   { taskId: el.dataset.sndone }); return; }
       if (el.dataset.sncheck)  { this._emit('teamhub:sncheck',  {}); return; }
       if (el.dataset.plancheck || el.dataset.planapply) {
         var ta = this.shadowRoot.querySelector('[data-plantext]');
@@ -1226,7 +1236,7 @@
         return;
       }
 
-      if (el.dataset.undo) { this._emit('teamhub:undo', { sessionId: el.dataset.undo }); return; }
+      if (el.dataset.undo) { this._sendingFor(el, 'Undoing…'); this._emit('teamhub:undo', { sessionId: el.dataset.undo }); return; }
 
       if (el.dataset.msg && d) {
         var key = el.dataset.msg;
@@ -1249,6 +1259,8 @@
         /* Disarm on screen straight away rather than leaving "Yes — take it
            off…" sitting there for as long as the round trip takes. */
         this._render();
+        var cb = this.shadowRoot.querySelector('[data-askcancel="' + sid.replace(/["\\]/g, '') + '"]');
+        if (cb) this._sendingFor(cb, 'Cancelling…');
         this._emit('teamhub:cancel', { sessionId: sid });
         return;
       }
@@ -1450,6 +1462,10 @@
           '<i style="width:38%"></i><i style="width:92%"></i><i style="width:88%"></i>' +
           '<i style="width:94%"></i><i style="width:70%"></i></div></div></div>';
       } else {
+        /* A screen that cannot be drawn says so. An exception here used to
+           leave the loading card up for good — which on a phone is a pale
+           empty page with no way to tell anything was wrong. */
+        try {
         var render = {
           month:     this._month,
           open:      this._open,
@@ -1460,6 +1476,12 @@
           team:      this._team
         }[d.view || 'month'] || this._month;
         body = render.call(this, d, message, state);
+        } catch (err) {
+          if (window.console) console.error('TeamHub: could not draw ' + d.view, err);
+          body = '<div class="page"><div class="card"><div class="empty">' +
+            'This screen could not be shown. Reload the page; if it keeps happening, ' +
+            'tell Sam which screen it was.</div></div></div>';
+        }
       }
 
       var view = this._pending || (d && d.view) || 'month';
@@ -1467,6 +1489,39 @@
       var bar = (d && d.me) ? dock(d.me, view, this._more) : '';
       this.shadowRoot.innerHTML =
         '<style>' + CSS + '</style><div class="app">' + chrome + body + bar + '</div>';
+      this._markSending();
+    }
+
+    /* A tapped button answers at once. The save behind it takes a second or
+       two — longer when the network is slow — and for that long the screen
+       used to look exactly as before, so people tapped again or thought it
+       had not worked. The button now says it is on its way and its row goes
+       quiet until the fresh screen replaces it. Kept across redraws (the page
+       sets "loading" in between) and dropped when the answer lands. */
+    _sendingFor(el, label) {
+      var keys = ['req', 'withdraw', 'assign', 'decline', 'unassign', 'undo', 'sndone', 'askcancel'];
+      for (var i = 0; i < keys.length; i++) {
+        var k = keys[i];
+        if (el.dataset[k]) {
+          this._sending = { attr: 'data-' + k, id: el.dataset[k], kind: el.dataset.kind || '', label: label };
+          this._markSending();
+          return;
+        }
+      }
+    }
+
+    _markSending() {
+      var s = this._sending;
+      if (!s) return;
+      var sel = '[' + s.attr + '="' + String(s.id).replace(/["\\]/g, '') + '"]' +
+        (s.kind ? '[data-kind="' + s.kind.replace(/["\\]/g, '') + '"]' : '');
+      var btn = this.shadowRoot.querySelector(sel);
+      if (!btn) return;
+      btn.textContent = s.label;
+      btn.setAttribute('disabled', '');
+      btn.setAttribute('data-sending', '1');
+      var row = btn.closest('.row, .qblock, .qrow, .pick-row, .item');
+      if (row) row.classList.add('is-sending');
     }
 
     /* A banner above the page, shared by every view. The slot is always
@@ -1623,6 +1678,12 @@
           (isFD(me) && !isCoach(me) ? 'shifts' : 'classes') +
           ' this month — tick anything you can’t make and it goes out for cover</p>' +
         '</div></div>');
+      if (me.test) {
+        out.push('<div class="card" data-testbanner="1" style="margin-bottom:16px;padding:12px 16px;' +
+          'background:var(--warn-tint);border-color:var(--warn)"><strong>Test account.</strong> ' +
+          'You are shown ' + esc(me.mirrors || 'nobody') + '’s classes. Anything you hand over ' +
+          'here is seen only by test accounts and testers — never by the team.</div>');
+      }
 
       /* Tagged for the same reason as the front desk totals card: typing an
          hours figure has to move the number above it without a full redraw. */
@@ -1808,7 +1869,7 @@
           var n = Number(s.requests || 0);
           out.push('<div class="row">' +
             '<div class="dotcol" style="background:' + esc(s.ownerColour || '#B9B9C6') + '"></div>' +
-            '<div class="row-main"><div class="row-t">' + esc(s.name) + '</div>' +
+            '<div class="row-main"><div class="row-t">' + esc(s.name) + testTag(s) + '</div>' +
             '<div class="row-s">' + esc(fmtShort(s.date)) + ' · ' + esc(s.time) +
               ' · normally ' + esc(shortName(s.ownerName)) +
               (s.discipline === 'frontdesk' ? ' · ' + hrs(s.hours) + ' h' : '') +
@@ -1920,7 +1981,7 @@
       if (queue.length) {
         queue.forEach(function (s) {
           out.push('<div class="qblock"><div class="qhead">' +
-            '<span class="qname">' + esc(s.name) + '</span>' +
+            '<span class="qname">' + esc(s.name) + testTag(s) + '</span>' +
             '<span class="qmeta">' + esc(fmtShort(s.date)) + ' · ' + esc(s.time) +
               ' · normally ' + esc(shortName(s.ownerName)) + '</span></div>');
           (s.requests || []).forEach(function (r) {
@@ -1965,7 +2026,7 @@
         noAsk.forEach(function (s) {
           out.push('<div class="row">' +
             '<div class="dotcol" style="background:var(--danger)"></div>' +
-            '<div class="row-main"><div class="row-t">' + esc(s.name) + '</div>' +
+            '<div class="row-main"><div class="row-t">' + esc(s.name) + testTag(s) + '</div>' +
             '<div class="row-s">' + esc(fmtShort(s.date)) + ' · ' + esc(s.time) +
               ' · normally ' + esc(shortName(s.ownerName)) + '</div></div>' +
             '<span class="pill pill-neutral">No requests</span>' +

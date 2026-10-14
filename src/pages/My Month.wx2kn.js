@@ -144,6 +144,8 @@ $w.onReady(async function () {
   el.on('teamhub:logout', async () => {
     try { await authentication.logout(); } catch (e) { /* signed out either way */ }
     view = 'month'; ym = null; monday = null;
+    /* The next person to sign in on this page must not see this one's screens. */
+    seen.clear(); warmed = false;
     showLogin({}, 'You’re signed out.');
   });
 
@@ -336,8 +338,11 @@ async function act(run, note) {
        on what they found return the sentence themselves. */
     const said = await run();
     busy = false;
-    seen.clear();                 // a write can change more than this screen
-    warmed = false;               // ...so the others are worth fetching again
+    /* Only the screen in front of you is reloaded. The other tabs keep their
+       copy: opening one shows it at once and fetches the fresh one behind it
+       (that is what load() does anyway). Wiping them and refetching all six
+       used to queue five or six calls — one of them five weeks of SportsNow —
+       behind every tap, so the next tap or tab waited for the lot. */
     await load(typeof said === 'string' ? said : note);
   } catch (err) {
     busy = false;
@@ -352,6 +357,8 @@ function say(state, message) {
 
 /* The backend throws short codes, not sentences, so the wording lives here
    where it can change without touching any logic. */
+const SN_DOWN = 'SportsNow isn’t answering right now, so TeamHub can’t load the classes. ' +
+  'Nothing is lost and nothing has changed. Please try again in 10 minutes.';
 function explain(err) {
   const code = String((err && err.message) || '');
   if (code.includes('NOT_SIGNED_IN')) return 'You are signed out. Reload the page and sign in again.';
@@ -372,7 +379,9 @@ function explain(err) {
   /* A visible error beats a screen that has quietly dropped rows: the numbers
      on it would look perfectly reasonable and be wrong. */
   if (code.includes('SPORTSNOW_NO_STORE')) return 'The SportsNow collections (SnLessons, SnChanges) are not set up yet, so changes cannot be recorded. The schedule itself still works.';
-  if (code.includes('SPORTSNOW_UNREACHABLE')) return 'SportsNow did not answer. Try again in a moment — if it keeps failing, SportsNow is down or has changed its calendar feed.';
+  /* Both SportsNow failures read the same to staff: it is not their fault,
+     nothing is lost, and the answer is to wait — not to message Sam. */
+  if (code.includes('SPORTSNOW_EMPTY') || code.includes('SPORTSNOW_UNREACHABLE')) return SN_DOWN;
   if (code.includes('TRUNCATED')) return 'There is more here than this screen can load at once, so some rows are missing. Tell Sam before trusting the numbers.';
   return 'Something went wrong. Reload the page and try again.';
 }
@@ -384,14 +393,29 @@ async function onAbsences(picks) {
   try {
     const res = await recordAbsences(picks);
     busy = false;
-    const n = res.created;
-    await load(n
-      ? n + ' session' + (n === 1 ? '' : 's') + ' recorded. The team can see ' + (n === 1 ? 'it' : 'them') + ' on the board now.'
-      : 'Nothing to record — those sessions were already handed over.');
+    await load(handoverNote(res));
   } catch (err) {
     busy = false;
     fail(err);
   }
+}
+
+/* Says exactly what happened to each pick. The old wording claimed a handover
+   that had saved nothing was "already handed over", which read as success. */
+function handoverNote(res) {
+  const n = (res && res.created) || 0;
+  const r = (res && res.refused) || {};
+  const s = k => k + ' session' + (k === 1 ? '' : 's');
+  const parts = [];
+  if (n) parts.push(s(n) + ' recorded — the team can see ' + (n === 1 ? 'it' : 'them') + ' on the board now.');
+  if (r.already) parts.push(s(r.already) + ' already handed over.');
+  const failed = (r.notRunning || 0) + (r.notYours || 0) + (r.unknown || 0);
+  if (failed) {
+    parts.push((n ? '' : 'Nothing was saved. ') + s(failed) + ' could not be handed over: ' +
+      'SportsNow does not show ' + (failed === 1 ? 'it' : 'them') + ' as yours on that date. ' +
+      'Reload and try again; if it still fails, tell Sam.');
+  }
+  return parts.join(' ') || 'Nothing was selected.';
 }
 
 /* Hours save without a reload: people type several in a row, and a redraw

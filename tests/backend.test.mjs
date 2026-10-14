@@ -5,6 +5,7 @@ import { seed, reset, setMember, resetCalls, calls, db,
   setFeed, FETCH_CALLS } from './wix-mocks.mjs';
 import { loadBackend } from './load-backend.mjs';
 
+globalThis.__SN_CACHE_MS = 0;   // every test sets its own feed
 const T = await loadBackend();
 
 let pass = 0, fail = 0;
@@ -47,8 +48,9 @@ function world() {
   /* My Month reads its dates from SportsNow now, not from the weekly pattern,
      so the little world needs a feed as much as it needs a Classes row. These
      two lessons are the c1 class actually running on D1 and D2. */
+  /* Both weeks carry the same id, as SportsNow's do: the id is the series. */
   setFeed([SN(1, D1, '18:00', 'Group Strength', 'Anna Meier'),
-           SN(2, D2, '18:00', 'Group Strength', 'Anna Meier')]);
+           SN(1, D2, '18:00', 'Group Strength', 'Anna Meier')]);
   return staff;
 }
 const as = who => setMember({ _id: 'm-' + who, loginEmail: who + '@blg.ch', loginEmailVerified: true });
@@ -893,6 +895,106 @@ ok('...and says so rather than quietly assigning it',
 ok('...which leaves it on nobody\'s month until an admin says whose it is',
   (as('anna'), (await T.getMyMonth((new Date()).toISOString().slice(0, 7)))
     .items.filter(i => /Sunrise Yoga/.test(i.name)).length) === 0);
+
+
+console.log('\n— a weekly class is one series, not one lesson (13 Oct) —');
+world(); as('anna');
+setFeed([SN(1, '2027-03-02', '18:00', 'Group Strength', 'Anna Meier'),
+         SN(1, '2027-03-09', '18:00', 'Group Strength', 'Anna Meier'),
+         SN(1, '2027-03-16', '18:00', 'Group Strength', 'Anna Meier'),
+         SN(1, '2027-03-23', '18:00', 'Group Strength', 'Anna Meier'),
+         SN(1, '2027-03-30', '18:00', 'Group Strength', 'Anna Meier')]);
+const tuesdays = (await T.getMyMonth(YM)).items.filter(i => i.kind === "class");
+ok('every Tuesday of the series is on the month, not just the first', tuesdays.length === 5,
+  tuesdays.map(i => i.date));
+
+console.log('\n— an empty SportsNow answer is not a quiet week (12 Oct) —');
+world(); as('anna');
+/* The snapshot says the week of D1 had a lesson; SportsNow now says nothing. */
+db.SnLessons.push({ _id: 'snap1', snId: '1', name: 'Group Strength', date: D1, time: '18:00' });
+setFeed([]);
+await threw('a month whose weeks come back empty', () => T.getMyMonth(YM), 'SPORTSNOW_EMPTY');
+ok('...after asking SportsNow a second time', FETCH_CALLS.filter(c => /2027-03-01/.test(c.url)).length === 2,
+  FETCH_CALLS.map(c => c.url));
+await threw('a handover checked against an empty week',
+  () => T.recordAbsences([{ kind: 'class', refId: 'c1', date: D1 }]), 'SPORTSNOW_EMPTY');
+ok('...saves nothing', db.Sessions.length === 0, db.Sessions);
+db.SnLessons.length = 0;
+const quiet = await T.getMyMonth(YM);
+ok('a week the snapshot has nothing for is believed', quiet.items.filter(i => i.kind === 'class').length === 0);
+
+console.log('\n— a handover says what it did not save —');
+world(); as('anna');
+let ra = await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D1 }, { kind: 'class', refId: 'c1', date: D1.slice(0, 8) + '03' }]);
+ok('one saved, one not running that day', ra.created === 1 && ra.asked === 2 && ra.refused.notRunning === 1, ra);
+ra = await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D1 }]);
+ok('again: already handed over', ra.created === 0 && ra.refused.already === 1, ra);
+as('bea');
+ra = await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D2 }]);
+ok('somebody else\'s class: not yours', ra.created === 0 && ra.refused.notYours === 1, ra);
+
+console.log('\n— the test account lives in its own world —');
+world();
+db.Staff.push({ _id: 'tst', title: 'Test', email: 'test@blg.ch', roles: 'coach,test',
+  disciplines: 'group,more', colour: '#000000', mirrors: 'Anna Meier' });
+db.Staff.find(p => p._id === 'cara').roles = 'admin,sportsnow,tester';
+db.Staff.push({ _id: 'eve', title: 'Eve Admin', email: 'eve@blg.ch', roles: 'admin', disciplines: '' });
+const tm = (as('test'), await T.getMyMonth(YM));
+ok('test sees the mirrored coach\'s classes', tm.items.filter(i => i.kind === 'class').length === 2,
+  tm.items.map(i => i.kind + i.date));
+ok('...but not her front desk shifts', tm.items.filter(i => i.kind === 'shift').length === 0);
+ok('...and knows it is a test account', tm.me.test === true && tm.me.mirrors === 'Anna Meier', tm.me);
+ra = await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D1 }]);
+ok('test can hand one over', ra.created === 1, ra);
+const ts = db.Sessions[0];
+ok('...as a test session', /^test\|/.test(ts.title) && ts.ownerId === 'tst', ts);
+as('anna');
+const am2 = await T.getMyMonth(YM);
+const annaRow = am2.items.find(i => i.kind === 'class' && i.date === D1);
+ok('the real coach\'s month is untouched', annaRow && annaRow.state === 'planned', annaRow);
+ok('she can still hand over the same class herself',
+  (await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D1 }])).created === 1);
+const realS = db.Sessions.find(x => !/^test\|/.test(x.title));
+/* The board looks 90 days ahead and the little world lives in 2027, so the
+   two sessions are moved to the next Tuesday for the board checks only. */
+const nearTue = (() => { const d = new Date(); do { d.setUTCDate(d.getUTCDate() + 1); } while (d.getUTCDay() !== 2);
+  return d.toISOString().slice(0, 10); })();
+const moveNear = on => [ts, realS].forEach(x => { x.date = on ? nearTue : D1; });
+moveNear(true);
+as('bea');
+let ob = await T.getOpenBoard();
+ok('real staff see the real handover only', ob.mine.length === 1 && ob.mine[0].sessionId === realS._id,
+  ob.mine);
+await threw('...and cannot ask for the test one', () => T.requestCover(ts._id, 'want'), 'NOT_FOUND');
+moveNear(false);
+as('eve');
+let aq2 = await T.getAdminQueue(YM);
+ok('an admin who is not a tester never sees it',
+  aq2.noAsk.concat(aq2.queue).every(x => x.sessionId !== ts._id) && aq2.counts.handed === 1, aq2.counts);
+ok('...nor in team absences', (await T.getTeamAbsences(YM)).people.every(p => p.name !== 'Test'));
+/* The tester asks for it and assigns it: one test account is enough. */
+db.Staff.find(p => p._id === 'cara').roles = 'admin,coach,sportsnow,tester';
+db.Staff.find(p => p._id === 'cara').disciplines = 'group';
+moveNear(true);
+as('cara');
+ob = await T.getOpenBoard();
+ok('the tester sees the test handover on the board, marked', ob.mine.some(x => x.sessionId === ts._id && x.test === true), ob.mine);
+await T.requestCover(ts._id, 'want');
+moveNear(false);
+aq2 = await T.getAdminQueue(YM);
+const tq = aq2.queue.find(x => x.sessionId === ts._id);
+ok('the tester sees it in the queue, marked TEST', tq && tq.test === true, aq2.queue);
+const tasksBefore = db.SportsNowTasks.length;
+await T.assignCover(tq.requests[0].requestId);
+ok('assigning it creates no SportsNow to-do', db.SportsNowTasks.length === tasksBefore, db.SportsNowTasks);
+as('test');
+const tAfter = await T.getMyMonth(YM);
+ok('the test account sees it covered, by the tester', (tAfter.items.find(i => i.date === D1 && i.kind === 'class') || {}).state === 'covered', tAfter.items);
+as('cara');
+ok('the tester\'s own month stays real', (await T.getMyMonth(YM)).items.every(i => i.state !== 'covering'));
+const tabs = await T.getTeamAbsences(YM);
+ok('a tester sees the test account in team absences',
+  tabs.people.some(p => p.name === 'Test') && tabs.total === 2, { total: tabs.total, people: tabs.people.map(p => p.name) });
 
 console.log('\n' + (fail ? 'FAILED ' + fail : 'all green') + '  (' + pass + ' passed)');
 process.exit(fail ? 1 : 0);
