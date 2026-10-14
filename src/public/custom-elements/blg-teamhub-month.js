@@ -56,10 +56,6 @@
     'July', 'August', 'September', 'October', 'November', 'December'];
   var DOWS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-  /* The board lives at this address once the domain is connected — it is the
-     link that goes into the group chat message. */
-  var OPEN_BOARD_URL = 'https://team.blgsports.ch/open';
-
   /* Front desk "Import from Excel" card — hidden until a better flow exists. */
   var SHOW_PLAN_IMPORT = false;
 
@@ -1026,8 +1022,9 @@
     items.forEach(function (i) {
       lines.push('• ' + fmtShort(i.date) + ', ' + i.time + ' — ' + i.name);
     });
-    lines.push('', 'Cover is greatly appreciated! You can pick one up here:',
-      OPEN_BOARD_URL);
+    /* No link: it would open in the browser, not in TeamHub on the home
+       screen, and team.blgsports.ch never existed. */
+    lines.push('', 'Cover is greatly appreciated! Check it out on the TeamHub app.');
     return lines.join('\n');
   }
 

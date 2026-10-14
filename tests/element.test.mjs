@@ -830,6 +830,8 @@ console.log('\n— the group message is a pop-up you cannot miss —');
   w = await dlg();
   ok('once saved it shows the WhatsApp message', w && /Recorded/.test(w.title) &&
     /Dear colleagues/.test(w.text) && /16 Mar|Tue 16/.test(w.text) && w.wa, w);
+  ok('...pointing to the TeamHub app, with no link in it',
+    /Check it out on the TeamHub app\./.test(w.text) && !/https?:/.test(w.text), w && w.text);
 
   await tap('[data-closeshare]');
   await page.waitForTimeout(30);
