@@ -66,7 +66,10 @@ const billed = mins => Math.max(1, Math.ceil((Number(mins) || 0) / 60));
    somebody else's class to the wrong person. */
 function idOfStaffNameIn(staffRows, who) {
   if (!String(who || '').trim()) return undefined;
-  const hit = staffRows.filter(p => sameName(p.title, who) && !isOff(p.active));
+  /* A test account is often named after the coach it mirrors ("Anna Meier
+     Test"); counted here it makes every lesson of hers ambiguous, and her
+     month quietly empties. The mirror itself is resolved by classOwnerFor. */
+  const hit = staffRows.filter(p => sameName(p.title, who) && !isOff(p.active) && !isTest(p));
   return hit.length === 1 ? hit[0]._id : undefined;
 }
 const list = s => String(s || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
@@ -221,6 +224,16 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
   /* `active` is filtered in memory rather than with .ne(): whether a query
      filter matches a row that has no value for the field at all is wixData
      behaviour we would rather not bet the whole timetable on. */
+  /* SportsNow goes out alongside the database reads instead of after them —
+     it is the slowest thing on the screen, so it should start first. A week
+     SportsNow answers empty against the snapshot no longer sinks the whole
+     month: it is shown empty and named, so the rest of the month stays usable. */
+  const doubtfulWeeks = [];
+  const snPromise = Promise.all(weeksOfMonth(ym).map(monday => snWeek(monday).catch(e => {
+    if (String(e && e.message) !== 'SPORTSNOW_EMPTY') throw e;
+    doubtfulWeeks.push(monday);
+    return [];
+  })));
   const [cRes, sRes, aRes, seRes, oRes, stRes] = await Promise.all([
     findAll(wixData.query('Classes'), 300),
     findAll(wixData.query('Shifts'), 100),
@@ -237,7 +250,7 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
      would not fit inside a web method. If the feed will not answer, the whole
      screen fails rather than falling back to the pattern: a month that quietly
      shows classes nobody is teaching is what we are getting rid of. */
-  const fetched = await Promise.all(weeksOfMonth(ym).map(monday => snWeek(monday)));
+  const fetched = await snPromise;
   /* One row per lesson. The weeks do not overlap, so this only matters when
      the feed repeats itself — but a lesson counted twice is an hour counted
      twice, and the month is what people read their pay off.
@@ -249,7 +262,9 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
   const seenLesson = {}, lessonsOn = {};
   fetched.forEach(rows => rows.forEach(l => {
     if (String(l.date).slice(0, 7) !== ym) return;
-    const k = `${l.date}|${l.time}|${l.name}`;
+    /* The series id joins the key so that two different classes sharing a
+       name and a start time (two rooms, two coaches) stay two lessons. */
+    const k = `${l.snId}|${l.date}|${l.time}|${l.name}`;
     if (seenLesson[k]) return;
     seenLesson[k] = 1;
     (lessonsOn[l.date] = lessonsOn[l.date] || []).push(l);
@@ -295,7 +310,8 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
   /* How many people have put a hand up for each session, so someone who has
      handed a class over can see whether anyone has yet without leaving the
      screen. Declined requests do not count — they are no longer on offer. */
-  const sessIds = sessions.map(s => s._id);
+  /* Only the counts for my own handovers are ever shown. */
+  const sessIds = sessions.filter(s => s.ownerId === staff._id).map(s => s._id);
   const reqRes = await findIn('CoverRequests', 'sessionId', sessIds, 600);
   const reqCount = {};
   reqRes.items.forEach(r => {
@@ -393,7 +409,7 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
     .filter(i => i.state !== 'needsCover' && i.state !== 'covered')
     .reduce((n, i) => n + i.hours, 0);
 
-  return { me: pub(staff), ym, today, items,
+  return { me: pub(staff), ym, today, items, doubtfulWeeks: doubtfulWeeks.sort(),
     totals: { hours: Math.round(totalHours * 100) / 100 } };
 });
 
@@ -410,6 +426,7 @@ export const recordAbsences = webMethod(Permissions.SiteMember, async (picks) =>
   const want = [], seen = {};
   for (const p of picks) {
     if (!p || (p.kind !== 'class' && p.kind !== 'shift')) continue;
+    if (isTest(staff) && p.kind !== 'class') continue;   // its month has no shifts
     if (!isDate(p.date) || typeof p.refId !== 'string' || p.date < today) continue;
     const title = (isTest(staff) ? 'test|' : '') + `${p.kind}:${p.refId}:${p.date}`;
     if (seen[title]) continue;                       // the same slot sent twice
@@ -815,8 +832,7 @@ export const requestCover = webMethod(Permissions.SiteMember, async (sessionId, 
   const row = s.kind === 'class'
     ? await wixData.get('Classes', s.refId, OPT)
     : await wixData.get('Shifts', s.refId, OPT);
-  if (!row || isOff(row.active) || (s.kind === 'class' ? !classRuns(row, s.date)
-                                   : Number(row.weekday) !== weekdayOf(s.date))) {
+  if (!row || isOff(row.active) || Number(row.weekday) !== weekdayOf(s.date)) {
     throw new Error('NOT_FOUND');
   }
   if (!canCover(staff, s.kind, describe(s.kind, row, s.date).discipline)) {
@@ -1116,6 +1132,8 @@ export const getFrontDesk = webMethod(Permissions.SiteMember, async (ym) => {
     findAll(wixData.query('Sessions').startsWith('date', ym).eq('kind', 'shift'), 600),
     findAll(wixData.query('ShiftOverrides').startsWith('date', ym), 600)
   ]);
+  /* Payroll is the real world only, whoever is looking. */
+  seRes.items = seRes.items.filter(s => !isTestSession(s));
   const assignAt = {}; aRes.items.forEach(a => {
     assignAt[`${a.shiftId}|${a.date}`] = plan.idOfEmail[mail(a.staffEmail)] || null;
   });
@@ -1498,7 +1516,8 @@ export const getWeek = webMethod(Permissions.SiteMember, async (monday) => {
   const assignAt = {}; aRes.items.forEach(a => {
     assignAt[`${a.shiftId}|${a.date}`] = plan.idOfEmail[mail(a.staffEmail)] || null;
   });
-  const sessionAt = {}; seRes.items.forEach(s => { sessionAt[`${s.kind}:${s.refId}:${s.date}`] = s; });
+  const sessionAt = {}; seRes.items.filter(s => !isTestSession(s))
+    .forEach(s => { sessionAt[`${s.kind}:${s.refId}:${s.date}`] = s; });
 
   const DOWS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -1577,7 +1596,7 @@ export const getSportsNowWeek = webMethod(Permissions.SiteMember, async (monday)
 
   /* The colour is the person's own, the same one the Schedule and the month
      use, so a week reads by colour before it reads by name. */
-  const personNamed = who => plan.staff.find(p => sameName(p.title, who)) || null;
+  const personNamed = who => plan.staff.find(p => !isTest(p) && sameName(p.title, who)) || null;
   const seen = {}, unknown = {};
 
   const at = {};

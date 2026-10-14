@@ -913,7 +913,10 @@ world(); as('anna');
 /* The snapshot says the week of D1 had a lesson; SportsNow now says nothing. */
 db.SnLessons.push({ _id: 'snap1', snId: '1', name: 'Group Strength', date: D1, time: '18:00' });
 setFeed([]);
-await threw('a month whose weeks come back empty', () => T.getMyMonth(YM), 'SPORTSNOW_EMPTY');
+const em = await T.getMyMonth(YM);
+ok('a month whose week comes back empty still opens, and names that week',
+  (em.doubtfulWeeks || []).join() === '2027-03-01' &&
+  em.items.filter(i => i.kind === 'class').length === 0, em.doubtfulWeeks);
 ok('...after asking SportsNow a second time', FETCH_CALLS.filter(c => /2027-03-01/.test(c.url)).length === 2,
   FETCH_CALLS.map(c => c.url));
 await threw('a handover checked against an empty week',
@@ -995,6 +998,125 @@ ok('the tester\'s own month stays real', (await T.getMyMonth(YM)).items.every(i 
 const tabs = await T.getTeamAbsences(YM);
 ok('a tester sees the test account in team absences',
   tabs.people.some(p => p.name === 'Test') && tabs.total === 2, { total: tabs.total, people: tabs.people.map(p => p.name) });
+
+/* ---------------------------------------------------------------------------
+   14 October review. A clock the test can move: the weekly check reads
+   `new Date()`, and the bugs below only show once a Monday has gone by. */
+{   // own scope: nothing here clashes with the sections above
+const RealDate = Date;
+const clockAt = iso => {
+  const t = RealDate.parse(iso);
+  globalThis.Date = class extends RealDate {
+    constructor(...a) { if (a.length) super(...a); else super(t); }
+    static now() { return t; }
+  };
+};
+const clockBack = () => { globalThis.Date = RealDate; };
+const plus = (ds, n) => new RealDate(RealDate.parse(ds + 'T00:00:00Z') + n * 864e5).toISOString().slice(0, 10);
+/* Every Tuesday from `first`, `n` of them, one series — as SportsNow has it. */
+/* Plus a Thursday class nobody touches, so cancelling one Tuesday does not
+   empty its whole week (a real week has about 37 lessons). */
+const tuesdaysFrom = (first, n, skip = []) => Array.from({ length: n }, (_, i) => plus(first, 7 * i))
+  .filter(d => !skip.includes(d)).map(d => SN(500, d, '18:00', 'Group Strength', 'Anna Meier'))
+  .concat(Array.from({ length: n }, (_, i) => SN(600, plus(first, 7 * i + 2), '09:00', 'Pilates', 'Bea Lang')));
+
+console.log('\n— the Monday window moves on a week —');
+world(); as('cara');
+clockAt('2026-10-12T02:00:00Z');                       // a Monday
+setFeed(tuesdaysFrom('2026-10-13', 30), { byWeek: true });
+await T.checkSportsNowNow();                           // baseline
+clockAt('2026-10-19T02:00:00Z');                       // next Monday, nothing changed
+let wk = await T.checkSportsNowNow();
+ok('the week the window gains is not reported as new classes', wk.added === 0,
+  wk.changes.map(c => c.text));
+clockAt('2026-10-26T02:00:00Z');
+setFeed(tuesdaysFrom('2026-10-13', 30, ['2026-11-10']), { byWeek: true });   // the studio cancels one
+wk = await T.checkSportsNowNow();
+ok('a cancelled lesson is reported as cancelled, not as "moved" to the far end',
+  wk.cancelled === 1 && wk.other === 0, wk.changes.map(c => c.kind + ': ' + c.text));
+clockBack();
+
+console.log('\n— a closed week does not break December for good —');
+world(); as('cara');
+clockAt('2026-12-07T02:00:00Z');
+setFeed(tuesdaysFrom('2026-10-13', 30), { byWeek: true });
+await T.checkSportsNowNow();                           // the snapshot sees Christmas classes
+const shut = ['2026-12-22', '2026-12-29', '2026-12-24', '2026-12-31'];
+setFeed(tuesdaysFrom('2026-10-13', 30, shut).filter(l => !shut.includes(l.date)), { byWeek: true });   // then the studio closes
+let job = 'ok'; try { await T.checkSportsNowNow(); } catch (e) { job = e.message; }
+ok('the Monday check still runs', job === 'ok', job);
+ok('...and records the closed lessons as cancelled', db.SnChanges.filter(c => c.kind === 'cancelled').length === 4,
+  db.SnChanges.map(c => c.text));
+as('anna');
+let dec = null; try { dec = await T.getMyMonth('2026-12'); } catch (e) { dec = e.message; }
+ok('December opens for the coach', dec && Array.isArray(dec.items) &&
+  dec.items.filter(i => i.kind === 'class').length === 3, dec && dec.items ? dec.items.map(i => i.date) : dec);
+clockAt('2027-02-01T09:00:00Z');                       // long after, the snapshot rows are still there
+dec = null; try { dec = await T.getMyMonth('2026-12'); } catch (e) { dec = e.message; }
+ok('...and still opens in February, for payroll', dec && Array.isArray(dec.items), dec);
+clockBack();
+
+console.log('\n— an empty feed is not mistaken for a closure —');
+world(); as('cara');
+clockAt('2026-12-07T02:00:00Z');
+setFeed(tuesdaysFrom('2026-10-13', 30), { byWeek: true });
+await T.checkSportsNowNow();
+const snapBefore = db.SnLessons.length, chBefore = db.SnChanges.length;
+setFeed([], { byWeek: true });                         // SportsNow answers every week empty
+let blank = 'ok'; try { await T.checkSportsNowNow(); } catch (e) { blank = e.message; }
+ok('a run where every week is empty is refused', blank === 'SPORTSNOW_EMPTY', blank);
+ok('...and leaves the snapshot and the change log alone',
+  db.SnLessons.length === snapBefore && db.SnChanges.length === chBefore,
+  { snap: [snapBefore, db.SnLessons.length], changes: [chBefore, db.SnChanges.length] });
+clockBack();
+
+console.log('\n— the test world stays out of payroll —');
+world();
+db.Staff.push({ _id: 'tst', title: 'Test', email: 'test@blg.ch', roles: 'coach,test',
+  disciplines: 'group', mirrors: 'Anna Meier' });
+as('test');
+await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D1 }]);
+const ts2 = await T.recordAbsences([{ kind: 'shift', refId: 's1', date: D1 }]);
+ok('a test account cannot hand over the mirrored coach\'s front desk shift', ts2.created === 0, ts2);
+db.Sessions.push({ _id: 'tshift', title: 'test|shift:s1:' + D1, kind: 'shift', refId: 's1', date: D1,
+  ownerId: 'tst', status: 'open', coveredById: null });   // as if it had got through
+as('cara');
+const fd2 = await T.getFrontDesk(YM);
+ok('front desk hours (payroll) ignore test sessions',
+  (fd2.totals.find(t => t.id === 'anna') || {}).hours === 8, fd2.totals);
+as('bea');
+const wk2 = await T.getWeek('2027-03-01');
+ok('the built schedule ignores test sessions',
+  wk2.days[1].classes.concat(wk2.days[1].shifts).every(c => c.tone !== 'open'), wk2.days[1]);
+
+console.log('\n— a test account named after the coach it mirrors —');
+world();
+db.Staff.push({ _id: 'tst', title: 'Anna Meier Test', email: 'test@blg.ch', roles: 'coach,test',
+  disciplines: 'group', mirrors: 'Anna Meier' });
+db.Classes[0].coachEmail = '';                         // SportsNow alone says whose class it is
+as('anna');
+ok('does not empty her month', (await T.getMyMonth(YM)).items.filter(i => i.kind === 'class').length === 2);
+as('test');
+ok('...and still mirrors her', (await T.getMyMonth(YM)).items.filter(i => i.kind === 'class').length === 2);
+
+console.log('\n— two classes, same name, same hour —');
+world();
+setFeed([SN(1, D1, '18:00', 'Group Strength', 'Anna Meier'),
+         SN(2, D1, '18:00', 'Group Strength', 'Bea Lang')]);
+as('bea');
+ok('the second coach keeps hers', (await T.getMyMonth(YM)).items.filter(i => i.kind === 'class').length === 1);
+
+console.log('\n— an occasional class SportsNow added mid-week —');
+world();
+db.Classes[0].dates = D1;                             // the plan knows one date
+setFeed([SN(1, D1, '18:00', 'Group Strength', 'Anna Meier'),
+         SN(1, D2, '18:00', 'Group Strength', 'Anna Meier')]);   // SportsNow already runs a second
+as('anna');
+ok('the coach can hand over the new date', (await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D2 }])).created === 1);
+as('bea');
+let rc = 'ok'; try { await T.requestCover(db.Sessions[0]._id, 'want'); } catch (e) { rc = e.message; }
+ok('...and a colleague can ask to cover it before Monday\'s check', rc === 'ok', rc);
+}
 
 console.log('\n' + (fail ? 'FAILED ' + fail : 'all green') + '  (' + pass + ' passed)');
 process.exit(fail ? 1 : 0);

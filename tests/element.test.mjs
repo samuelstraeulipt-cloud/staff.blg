@@ -830,8 +830,10 @@ console.log('\n— the group message is a pop-up you cannot miss —');
   w = await dlg();
   ok('once saved it shows the WhatsApp message', w && /Recorded/.test(w.title) &&
     /Dear colleagues/.test(w.text) && /16 Mar|Tue 16/.test(w.text) && w.wa, w);
-  ok('...pointing to the TeamHub app, with no link in it',
-    /Check it out on the TeamHub app\./.test(w.text) && !/https?:/.test(w.text), w && w.text);
+  ok('...pointing to the home-screen app first, with the Open classes link as a fallback',
+    /Open TeamHub from your home screen, or use this link:/.test(w.text) &&
+    /https:\/\/www\.blgsports\.ch\/teamhub\?view=open/.test(w.text) &&
+    !/team\.blgsports\.ch/.test(w.text), w && w.text);
 
   await tap('[data-closeshare]');
   await page.waitForTimeout(30);
@@ -878,6 +880,67 @@ console.log('\n— the group message is a pop-up you cannot miss —');
   await page.waitForTimeout(30);
   ok('it does not survive a sign-out', !(await dlg()));
   await page.setViewportSize({ width: 1280, height: 720 });
+}
+
+/* 14 October review. */
+{
+  console.log('\n— review 14 Oct —');
+  const root = `document.querySelector('blg-teamhub-month').shadowRoot`;
+  const got = [];
+  await page.exposeFunction('note14', e => got.push(e));
+  await page.evaluate(() => ['teamhub:closeshift'].forEach(n => document.querySelector('blg-teamhub-month')
+    .addEventListener(n, e => window.note14({ n, d: e.detail }))));
+
+  const FDX = JSON.parse(JSON.stringify(FD));
+  FDX.rows[0].closed = false; FDX.rows[0].past = false;
+  await set(FDX, 'ready', '');
+  await page.waitForTimeout(40);
+  await page.evaluate(`(${root}.querySelector('.fdrow') || ${root}.querySelector('tbody tr')).click()`);
+  await page.waitForTimeout(40);
+  await page.evaluate(`${root}.querySelector('[data-fdclose]').click()`);
+  await page.waitForTimeout(40);
+  ok('"kein Frontdesk" in the shift panel actually sends teamhub:closeshift',
+    got.some(e => e.n === 'teamhub:closeshift' && e.d.closed === true), got);
+
+  const row = (d, st) => ({ kind: 'class', refId: 'c1', date: d, time: '18:00', name: 'Group Strength',
+    discipline: 'group', hours: 1, plannedHours: 1, editableHours: false, state: st || 'planned',
+    note: '', sessionId: null, selectable: true, requests: 0 });
+  const M14 = { view: 'month', me: ME, ym: '2027-03', today: '2027-03-01', totals: { hours: 2 },
+    items: [row('2027-03-02'), row('2027-03-09')] };
+  await set(M14, 'ready', '');                       // the page paints its stored copy…
+  await page.evaluate(`${root}.querySelector('[data-pick]').click()`);
+  await set(M14, 'ready', null);                     // …then the fresh one lands
+  await page.waitForTimeout(40);
+  ok('a tick survives the fresh copy of the same month', await page.evaluate(`${root}.querySelectorAll('.pick-row.sel').length`) === 1);
+  const M14b = JSON.parse(JSON.stringify(M14)); M14b.items[0].state = 'needsCover';
+  await set(M14b, 'ready', null);
+  await page.waitForTimeout(40);
+  ok('...but not once that session is no longer tickable', await page.evaluate(`${root}.querySelectorAll('.pick-row.sel').length`) === 0);
+  await set(Object.assign({}, M14, { ym: '2027-04' }), 'ready', null);
+  ok('...and a different month starts clean', await page.evaluate(`${root}.querySelectorAll('.pick-row.sel').length`) === 0);
+
+  await set(M14, 'ready', '');
+  await set(null, 'error', 'Someone has already been assigned to that session.');
+  await page.waitForTimeout(40);
+  const txt = await page.evaluate(`${root}.textContent`);
+  ok('a failed action keeps the screen and says why above it',
+    txt.includes('Group Strength') && txt.includes('already been assigned') &&
+    await page.evaluate(`!!${root}.querySelector('.flash-in.err')`));
+
+  await set(Object.assign({}, M14, { doubtfulWeeks: ['2027-03-08'] }), 'ready', '');
+  await page.waitForTimeout(40);
+  ok('the group message puts the home-screen app first and links to Open classes',
+    await page.evaluate(`(function () {
+      var el = document.querySelector('blg-teamhub-month');
+      el._share = [{ kind: 'class', refId: 'c1', date: '2027-03-02', time: '18:00', name: 'Group Strength' }];
+      el._shareState = 'ready'; el._shareFrom = 'message'; el._syncShare();
+      var t = (el.shadowRoot.getElementById('waText') || {}).textContent || '';
+      el._closeShare();
+      return /home screen/.test(t) && t.indexOf('https://www.blgsports.ch/teamhub?view=open') > -1 &&
+        t.indexOf('team.blgsports.ch') === -1;
+    })()`));
+  ok('a week SportsNow answered empty is named on the month',
+    await page.evaluate(`!!${root}.querySelector('[data-doubtful]')`));
 }
 
 console.log('\n— errors —');

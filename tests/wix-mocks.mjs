@@ -83,14 +83,23 @@ export const elevate = fn => (...args) => fn(...args);
    sets SN_FEED (rows, or an Error to throw, or a status number). */
 export let FETCH_CALLS = [];
 export let SN_FEED = [];
-export function setFeed(v) { SN_FEED = v; FETCH_CALLS = []; }
+/* `byWeek` answers each request with only the rows of the week asked for, as
+   the real feed does — needed to model one week going empty (a closure). */
+let BY_WEEK = false;
+export function setFeed(v, opts) { SN_FEED = v; FETCH_CALLS = []; BY_WEEK = !!(opts && opts.byWeek); }
 export async function fetch(url, opts) {
   FETCH_CALLS.push({ url, method: (opts && opts.method) || 'get', body: opts && opts.body });
   if (SN_FEED instanceof Error) throw SN_FEED;
   if (typeof SN_FEED === 'number') {
     return { ok: false, status: SN_FEED, json: async () => ({}) };
   }
-  return { ok: true, status: 200, json: async () => SN_FEED };
+  let rows = SN_FEED;
+  const m = BY_WEEK && /[?&]date=(\d{4}-\d{2}-\d{2})/.exec(url);
+  if (m) {
+    const end = new Date(Date.parse(m[1] + 'T00:00:00Z') + 6 * 86400000).toISOString().slice(0, 10);
+    rows = SN_FEED.filter(r => r.date >= m[1] && r.date <= end);
+  }
+  return { ok: true, status: 200, json: async () => rows };
 }
 
 export let CALLS = 0;

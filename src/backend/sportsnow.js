@@ -55,11 +55,16 @@ export function mondayOf(ds) {
 
 /* One week, as SportsNow has it. Throws rather than returning half a week:
    a schedule that is quietly missing its afternoon is worse than an error. */
+const FETCH_TIMEOUT_MS = 8000;
+const withTimeout = (p, ms) => new Promise((resolve, reject) => {
+  const t = setTimeout(() => reject(new Error('timeout after ' + ms + ' ms')), ms);
+  p.then(v => { clearTimeout(t); resolve(v); }, e => { clearTimeout(t); reject(e); });
+});
 async function fetchWeek(monday) {
   let rows;
   try {
-    const res = await fetch(`${SN_URL}?date=${monday}`, { method: 'post',
-      headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const res = await withTimeout(fetch(`${SN_URL}?date=${monday}`, { method: 'post',
+      headers: { 'Content-Type': 'application/json' }, body: '{}' }), FETCH_TIMEOUT_MS);
     if (!res.ok) throw new Error('status ' + res.status);
     rows = await res.json();
   } catch (e) {
@@ -81,7 +86,21 @@ async function fetchWeek(monday) {
    lessons in that week then, the empty answer is asked for once more and,
    if it is still empty, treated as a failure. A week the snapshot has nothing
    for — the past, or a closure — is believed. */
+async function snapshotHasAny(from, until) {
+  try {
+    const res = await wixData.query('SnLessons').ge('date', from).le('date', until).limit(1).find(OPT);
+    return res.items.length > 0;
+  } catch (e) {
+    return false;                       // no snapshot store: nothing to protect
+  }
+}
+
 async function snapshotHas(monday) {
+  /* Only a week that is still ahead is guarded. Snapshot rows are never
+     pruned once their date has passed, so without this every past week would
+     be "known to have lessons" for ever, and one closure — or a feed that does
+     not answer for the past — would break that month permanently. */
+  if (monday < mondayOf(utcToday())) return false;
   try {
     const res = await wixData.query('SnLessons').ge('date', monday)
       .le('date', addDays(monday, 6)).limit(1).find(OPT);
@@ -100,10 +119,19 @@ const weekCache = new Map();          // monday -> { at, rows } | { promise }
 const ttl = () => (typeof globalThis !== 'undefined' &&
   typeof globalThis.__SN_CACHE_MS === 'number') ? globalThis.__SN_CACHE_MS : WEEK_TTL_MS;
 
-async function loadWeek(monday) {
+const utcToday = () => new Date().toISOString().slice(0, 10);
+
+async function loadWeek(monday, allowEmpty) {
   let rows = await fetchWeek(monday);
   if (!rows.length && await snapshotHas(monday)) {
     rows = await fetchWeek(monday);
+    /* The weekly check is the one reader allowed to believe it: it is what
+       refreshes the snapshot, so refusing here would keep the snapshot — and
+       with it the refusal — in place for good (a Christmas closure). */
+    if (!rows.length && allowEmpty) {
+      console.error('snWeek: SportsNow still shows no lessons for ' + monday + ' — recorded as cancelled');
+      return rows;
+    }
     if (!rows.length) {
       console.error('snWeek: SportsNow answered ' + monday + ' with no lessons, but the snapshot has some');
       throw new Error('SPORTSNOW_EMPTY');
@@ -112,14 +140,15 @@ async function loadWeek(monday) {
   return rows;
 }
 
-export async function snWeek(monday) {
-  const now = Date.now(), keep = ttl();
+export async function snWeek(monday, opts) {
+  const allowEmpty = !!(opts && opts.allowEmpty);
+  const now = Date.now(), keep = allowEmpty ? 0 : ttl();
   const hit = keep > 0 ? weekCache.get(monday) : null;
   let rows;
   if (hit && hit.rows && now - hit.at < keep) rows = hit.rows;
   else if (hit && hit.promise) rows = await hit.promise;
   else {
-    const promise = loadWeek(monday);
+    const promise = loadWeek(monday, allowEmpty);
     if (keep > 0) weekCache.set(monday, { promise });
     try {
       rows = await promise;
@@ -252,7 +281,8 @@ function coachFor(lessons, staff) {
   if (!names.length) return { email: '', sure: true, named: '' };
   const named = names[0];
   const hit = staff.filter(p => sameName(p.title, named) &&
-    !/^(false|no|0)$/i.test(String(p.active)) && tidy(p.email));
+    !/^(false|no|0)$/i.test(String(p.active)) && tidy(p.email) &&
+    !/(^|,)\s*test\s*(,|$)/i.test(String(p.roles || '')));
   if (hit.length !== 1) return { email: '', sure: false, named };
   return { email: tidy(hit[0].email).toLowerCase(), sure: true, named };
 }
@@ -382,7 +412,18 @@ export async function checkSportsNow(silent) {
   /* The weeks go out together: a web method has seconds, not minutes, and
      four round trips one after another used up the whole budget before a
      single row was written. */
-  const fetched = await Promise.all(weeks.map(monday => snWeek(monday)));
+  const fetched = await Promise.all(weeks.map(monday => snWeek(monday, { allowEmpty: true })));
+
+  /* An empty week is only believed while the feed is plainly alive: at least
+     one other week in this run has lessons. If every week came back empty it
+     is SportsNow having a moment, not a sixteen-week closure — recording all
+     of it as cancelled would wipe the snapshot and with it the guard that
+     keeps staff from seeing a quietly blank month. With nothing in the
+     snapshot for the window there is nothing to lose, and the run goes on. */
+  if (!fetched.some(rows => rows.length) && await snapshotHasAny(from, until)) {
+    console.error('snWeek: SportsNow answered every week of the check with no lessons — run skipped');
+    throw new Error('SPORTSNOW_EMPTY');
+  }
 
   /* One row per lesson. SportsNow's id belongs to the series — every week of
      a weekly class has the same one — so a lesson is the series on a date.
@@ -418,13 +459,24 @@ export async function checkSportsNow(silent) {
   const baseline = res.items.length === 0 ||
     !res.items.some(r => String(r.title || '').includes('|'));
 
+  /* How far the last run looked. Every Monday the window moves on a week,
+     and that week's lessons are new to the snapshot without being new to
+     SportsNow; only a lesson inside the old window is really "added". */
+  const horizon = res.items.reduce((m, r) => {
+    /* Rows written since this fix carry the window they were seen in; older
+       rows fall back to the end of their own week. */
+    const h = String(r.horizon || addDays(mondayOf(String(r.date)), 6));
+    return h > m ? h : m;
+  }, '');
+
   const changes = [], fresh = [], updates = [], gone = [];
   live.forEach(l => {
     const key = lessonKey(l);
     const old = was[key];
-    const row = { title: key, snId: l.snId, date: l.date, time: l.time, name: l.name, coach: l.coach };
+    const row = { title: key, snId: l.snId, date: l.date, time: l.time, name: l.name,
+                  coach: l.coach, horizon: until };
     if (!old) {
-      if (!baseline) changes.push({ kind: 'added', key, lesson: l,
+      if (!baseline && l.date <= horizon) changes.push({ kind: 'added', key, lesson: l,
         text: `New: ${l.name}, ${l.date} ${l.time}${l.coach ? ` — ${l.coach}` : ''}` });
       fresh.push(row);
       return;

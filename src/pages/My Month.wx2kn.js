@@ -19,6 +19,7 @@
    here and a renderer there, and nothing else changes.
    ========================================================================== */
 import { authentication } from '@wix/site';
+import wixLocationFrontend from 'wix-location-frontend';
 import {
   whoAmI, requestAccess,
   getMyMonth, recordAbsences, undoAbsence, logHours,
@@ -35,7 +36,8 @@ let el;
 let view = 'month';   // which screen is on display
 let ym = null;        // the month it is showing, "YYYY-MM"
 let monday = null;    // the week the schedule is showing, "YYYY-MM-DD"
-let busy = false;     // one request at a time, so reloads never interleave
+let busy = false;     // one write at a time; a background reload never blocks a tap
+let gen = 0;          // bumped on sign-out: nothing started before it may paint or cache
 let shown = null;     // the data the element is showing now
 
 /* A screen costs a round trip — about a second on a phone — and for that
@@ -43,7 +45,7 @@ let shown = null;     // the data the element is showing now
    answer for each screen is kept, painted straight away when you come back
    to it, and replaced when the fresh one lands. Any write empties this,
    because a write can change screens other than the one in front of you. */
-const seen = new Map();
+const seen = new Map();          // key -> the screen as a JSON string
 let loadSeq = 0;
 /* A screen is keyed by the one thing it reads. Keying every screen by both
    the month and the week meant My Month was stored during the prefetch while
@@ -63,10 +65,14 @@ let warmed = false;
 async function warmOthers(me) {
   if (warmed) return;
   warmed = true;
-  const roles = String((me && me.roles) || '').split(',').map(r => r.trim());
+  const mine = gen;
+  /* `me.roles` arrives as an array from the backend. */
+  const roles = [].concat((me && me.roles) || []).map(r => String(r).trim());
   const admin = roles.includes('admin');
-  const wanted = ['month', 'open', 'team', 'sportsnow']
-    .concat(admin ? ['admin'] : [])
+  /* Team absences is admin-only on the backend: asking for it as a coach is a
+     wasted round trip that always fails. */
+  const wanted = ['month', 'open', 'sportsnow']
+    .concat(admin ? ['admin', 'team'] : [])
     .concat(admin || roles.includes('frontdesk') ? ['frontdesk'] : []);
 
   for (const v of wanted) {
@@ -74,13 +80,15 @@ async function warmOthers(me) {
     if (seen.has(keyFor(v))) continue;
     try {
       const data = await LOADERS[v]();
+      if (mine !== gen) return;                   // signed out meanwhile: drop it
       /* Adopt a month or a week the server chose for us only if we have none,
          so the first tap looks the screen up under the key it was stored at.
          Never overwrite one the person has arrowed to. */
       if (data.ym && !ym) ym = data.ym;
       if (data.monday && !monday) monday = data.monday;
-      seen.set(keyFor(v), data);
+      seen.set(keyFor(v), JSON.stringify(data));
     } catch (e) {
+      if (mine !== gen) return;
       /* A screen this person may not open, or a feed that did not answer.
          Neither is worth saying anything about: the tab still works, it just
          pays for itself when it is tapped. */
@@ -144,7 +152,9 @@ $w.onReady(async function () {
   el.on('teamhub:logout', async () => {
     try { await authentication.logout(); } catch (e) { /* signed out either way */ }
     view = 'month'; ym = null; monday = null;
-    /* The next person to sign in on this page must not see this one's screens. */
+    /* The next person to sign in on this page must not see this one's screens —
+       neither the stored ones nor any still on their way back. */
+    gen++; loadSeq++; busy = false;
     seen.clear(); warmed = false;
     showLogin({}, 'You’re signed out.');
   });
@@ -254,8 +264,30 @@ async function start() {
   let who = null;
   try { who = await whoAmI(); } catch (e) { who = null; }
   if (who && !who.ok) { fail(new Error(who.reason || '')); return; }
-  view = (who && who.ok && (who.me.roles || []).includes('admin')) ? 'admin' : 'month';
+  const roles = (who && who.ok && who.me.roles) || [];
+  view = askedView(roles) || (roles.includes('admin') ? 'admin' : 'month');
   await load();
+}
+
+/* A link can ask for a screen: …/teamhub?view=open is the one in the group
+   message. Only screens this person may open are honoured; anything else
+   falls back to the usual landing screen. It is used once — after that the
+   tabs decide, and signing out and in again lands where it normally would. */
+const ASKABLE = {
+  open: () => true, month: () => true, sportsnow: () => true,
+  admin: r => r.includes('admin'), team: r => r.includes('admin'),
+  frontdesk: r => r.includes('admin') || r.includes('frontdesk')
+};
+let askedUsed = false;
+function askedView(roles) {
+  if (askedUsed) return null;
+  askedUsed = true;
+  let v = '';
+  try { v = String((wixLocationFrontend.query || {}).view || '').toLowerCase(); } catch (e) { v = ''; }
+  if (!ASKABLE[v] || !ASKABLE[v](roles)) return null;
+  /* Off the address bar too, so a reload is an ordinary reload. */
+  try { wixLocationFrontend.queryParams.remove(['view']); } catch (e) { /* not fatal */ }
+  return v;
 }
 
 function showLogin(extra, note, state) {
@@ -294,36 +326,43 @@ function fail(err) {
 
 /* --------------------------------------------------------------- loading */
 async function load(note) {
-  const seq = ++loadSeq;          // a newer switch always wins
+  const seq = ++loadSeq;          // a newer switch, a write or a sign-out always wins
   const hit = note ? null : seen.get(screenKey());
   if (hit) {
-    shown = hit;
+    shown = JSON.parse(hit);
     el.setAttribute('message', '');
-    el.setAttribute('data', JSON.stringify(hit));
+    el.setAttribute('data', hit);
     el.setAttribute('state', 'ready');
   } else {
     el.setAttribute('state', 'loading');
     if (!note) el.setAttribute('message', '');
   }
 
-  busy = true;
+  /* No `busy` here. Holding it for the background refresh after a cached
+     paint meant a tap on the screen you could already see was silently
+     dropped for a second or two — the button said "Sending…" and nothing
+     was sent. A write now simply wins: it bumps loadSeq and this answer is
+     thrown away. */
   try {
     const data = await (LOADERS[view] || LOADERS.month)();
     if (seq !== loadSeq) return;                   // somebody moved on
     /* Remember where each screen left us, so the arrows keep their place. */
     if (data.ym) ym = data.ym;
     if (data.monday) monday = data.monday;
-    shown = data;
-    seen.set(screenKey(), data);
-    el.setAttribute('data', JSON.stringify(data));
+    const json = JSON.stringify(data);
+    seen.set(screenKey(), json);
+    /* Same answer as the copy already painted: leave the screen alone, so
+       ticks, an open panel or a half-typed number are not wiped for nothing. */
+    if (json !== hit) {
+      shown = data;
+      el.setAttribute('data', json);
+    }
     el.setAttribute('state', 'ready');
     if (note) el.setAttribute('message', note);
     /* Not awaited: the screen is up, the rest can arrive in its own time. */
     warmOthers(data.me);
   } catch (err) {
     if (seq === loadSeq) fail(err);
-  } finally {
-    if (seq === loadSeq) busy = false;
   }
 }
 
@@ -332,11 +371,14 @@ async function load(note) {
 async function act(run, note) {
   if (busy) return;
   busy = true;
+  loadSeq++;                      // a background refresh must not paint over the write
+  const mine = gen;
   el.setAttribute('state', 'loading');
   try {
     /* Most writes have one thing to say whatever happens. The few that depend
        on what they found return the sentence themselves. */
     const said = await run();
+    if (mine !== gen) return;     // signed out while it was on its way
     busy = false;
     /* Only the screen in front of you is reloaded. The other tabs keep their
        copy: opening one shows it at once and fetches the fresh one behind it
@@ -389,9 +431,12 @@ function explain(err) {
 async function onAbsences(picks) {
   if (busy || !Array.isArray(picks) || !picks.length) return;
   busy = true;
+  loadSeq++;
+  const mine = gen;
   el.setAttribute('state', 'loading');
   try {
     const res = await recordAbsences(picks);
+    if (mine !== gen) return;
     busy = false;
     await load(handoverNote(res));
   } catch (err) {

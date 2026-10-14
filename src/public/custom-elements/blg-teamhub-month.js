@@ -56,6 +56,9 @@
     'July', 'August', 'September', 'October', 'November', 'December'];
   var DOWS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+  /* The TeamHub page, opened on Open classes — the link in the group message. */
+  var OPEN_CLASSES_URL = 'https://www.blgsports.ch/teamhub?view=open';
+
   /* Front desk "Import from Excel" card — hidden until a better flow exists. */
   var SHOW_PLAN_IMPORT = false;
 
@@ -1010,6 +1013,20 @@
   /* My Month is the screen with no name: getMyMonth sends no `view`, and the
      renderer falls back to the month when it is missing. */
   function isMonth(d) { return !!d && (d.view || 'month') === 'month'; }
+  function sameScreen(a, b) {
+    return !!a && !!b && !!a.me && !!b.me && a.me.id === b.me.id &&
+      (a.view || 'month') === (b.view || 'month') && a.ym === b.ym;
+  }
+  function keepTicks(sel, d) {
+    var out = {};
+    (d.items || []).forEach(function (i) {
+      var k = i.kind + ':' + i.refId + ':' + i.date;
+      if (sel[k] && i.state === 'planned' && i.date >= d.today && i.refId) {
+        out[k] = { kind: i.kind, refId: i.refId, date: i.date, _item: i };
+      }
+    });
+    return out;
+  }
 
   /* The message for the group chat, built from the sessions in question. */
   function waText(items) {
@@ -1022,9 +1039,12 @@
     items.forEach(function (i) {
       lines.push('• ' + fmtShort(i.date) + ', ' + i.time + ' — ' + i.name);
     });
-    /* No link: it would open in the browser, not in TeamHub on the home
-       screen, and team.blgsports.ch never existed. */
-    lines.push('', 'Cover is greatly appreciated! Check it out on the TeamHub app.');
+    /* A link cannot open TeamHub from the home screen: WhatsApp always opens
+       it in a browser (and on an iPhone the browser has its own sign-in). So
+       the home-screen app comes first, and the link is the fallback for
+       anyone who has not saved it. `?view=open` lands on Open classes. */
+    lines.push('', 'Cover is greatly appreciated! Open TeamHub from your home screen, ' +
+      'or use this link:', OPEN_CLASSES_URL);
     return lines.join('\n');
   }
 
@@ -1105,8 +1125,12 @@
       }
       if (name === 'data' && newV) {
         try {
+          var prev = this._data;
           this._data = JSON.parse(newV);
-          this._sel = {};        // a fresh month starts unticked
+          /* A fresh copy of the screen already on display (the page paints its
+             stored copy first, then the answer from the server) keeps whatever
+             is still tickable ticked. A different month or screen starts clean. */
+          this._sel = sameScreen(prev, this._data) ? keepTicks(this._sel, this._data) : {};
           this._snDay = null;    // and a fresh week starts on its own today
           this._fdOpen = null;   // and no shift is left hanging open
           this._confirm = null;  // and no half-pressed buttons
@@ -1200,7 +1224,7 @@
             '[data-withdraw],[data-assign],[data-decline],[data-unassign],' +
             '[data-askcancel],[data-nocancel],[data-cancel],[data-authmode],[data-signout],[data-sndone],' +
             '[data-plancheck],[data-planapply],[data-planclear],[data-sncheck],' +
-            '[data-more],[data-snview],[data-snday],[data-fdrow]')
+            '[data-more],[data-snview],[data-snday],[data-fdrow],[data-fdclose]')
         : null;
       if (!el) return;
 
@@ -1511,6 +1535,13 @@
         return;
       }
 
+      /* A failed write or a failed refresh says so above the screen it
+         happened on. Replacing a perfectly good (stored) screen with a bare
+         error card hid the data and the tabs' context for something like
+         "someone was already assigned". The card stays for a first load. */
+      if (state === 'error' && d && d.me && !this._pending) {
+        state = 'ready-with-error';
+      }
       if (state === 'error') {
         body = '<div class="page"><div class="card"><div class="empty">' +
           esc(message || 'Something went wrong. Reload the page and try again.') +
@@ -1705,7 +1736,8 @@
 
     _flashInner(message, state) {
       if (!message) return '';
-      return '<div class="flash-in' + (state === 'error' ? ' err' : '') + '">' +
+      var bad = state === 'error' || state === 'ready-with-error';
+      return '<div class="flash-in' + (bad ? ' err' : '') + '">' +
         esc(message) + '</div>';
     }
 
@@ -1860,6 +1892,15 @@
 
       /* Tagged for the same reason as the front desk totals card: typing an
          hours figure has to move the number above it without a full redraw. */
+      /* Weeks SportsNow answered empty although the last weekly check saw
+         classes in them: shown empty, and said so, rather than failing the
+         whole month. */
+      if ((d.doubtfulWeeks || []).length) {
+        out.push('<div class="card" data-doubtful="1" style="margin-bottom:16px;padding:12px 16px;' +
+          'background:var(--warn-tint);border-color:var(--warn)">SportsNow shows no classes for the week of ' +
+          d.doubtfulWeeks.map(function (m) { return esc(fmtShort(m)); }).join(', ') +
+          '. If that is wrong, reload in a few minutes — the rest of the month is up to date.</div>');
+      }
       out.push('<div class="stats" data-statscard="1">' + this._monthStats(d) + '</div>');
 
       /* The group chat message is a pop-up now: see _syncShare. */
