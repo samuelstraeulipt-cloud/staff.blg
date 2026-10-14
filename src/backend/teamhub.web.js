@@ -1132,12 +1132,14 @@ export const getFrontDesk = webMethod(Permissions.SiteMember, async (ym) => {
     findAll(wixData.query('Sessions').startsWith('date', ym).eq('kind', 'shift'), 600),
     findAll(wixData.query('ShiftOverrides').startsWith('date', ym), 600)
   ]);
-  /* Payroll is the real world only, whoever is looking. */
-  seRes.items = seRes.items.filter(s => !isTestSession(s));
+  /* Payroll is the real world only, whoever is looking. (Filtered into a new
+     list: a wixData query result's `items` is a getter, and assigning to it
+     throws in the live backend.) */
+  const realSessions = seRes.items.filter(s => !isTestSession(s));
   const assignAt = {}; aRes.items.forEach(a => {
     assignAt[`${a.shiftId}|${a.date}`] = plan.idOfEmail[mail(a.staffEmail)] || null;
   });
-  const sessionAt = {}; seRes.items.forEach(s => { sessionAt[`${s.refId}|${s.date}`] = s; });
+  const sessionAt = {}; realSessions.forEach(s => { sessionAt[`${s.refId}|${s.date}`] = s; });
   const overrideAt = {}; oRes.items.forEach(o => { overrideAt[`${o.shiftId}|${o.date}`] = Number(o.hours); });
 
   const rows = [], totals = {};

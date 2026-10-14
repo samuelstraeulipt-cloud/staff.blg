@@ -131,7 +131,10 @@ class Q {
     const items = all.slice(0, this._limit).map(r => ({ ...r }));
     /* Both signals the real result carries, so `findAll` can be tested using
        either one on its own. */
-    return { items, totalCount: all.length, hasNext: () => all.length > items.length };
+    /* Like Wix, `items` is a getter: assigning to it throws in the live
+       backend, so it throws here too (it took Front desk down on 14 Oct). */
+    return { get items() { return items; }, totalCount: all.length,
+             hasNext: () => all.length > items.length };
   }
 }
 
