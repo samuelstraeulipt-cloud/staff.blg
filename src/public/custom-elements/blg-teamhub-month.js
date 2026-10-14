@@ -1011,6 +1011,10 @@
       '</div>' + (legend ? '<div class="legend">' + legend + '</div>' : '') + '</div>';
   }
 
+  /* My Month is the screen with no name: getMyMonth sends no `view`, and the
+     renderer falls back to the month when it is missing. */
+  function isMonth(d) { return !!d && (d.view || 'month') === 'month'; }
+
   /* The message for the group chat, built from the sessions in question. */
   function waText(items) {
     if (!items.length) return '';
@@ -1111,9 +1115,9 @@
           this._confirm = null;  // and no half-pressed buttons
           this._authMode = null; // the page decides which sign-in screen comes next
           this._sending = null;  // the answer is in: the tapped button is done
-          if (this._shareState === 'saving' && this._data && this._data.view === 'month') {
+          if (this._shareState === 'saving' && isMonth(this._data)) {
             this._settleShare(this._data);
-          } else if (!this._data || this._data.view !== 'month') {
+          } else if (!isMonth(this._data)) {
             this._share = null;    // signed out, or another screen: the pop-up goes
             this._shareState = null;
           }
@@ -1587,7 +1591,7 @@
       if (!this.shadowRoot) return;
       var dlg = this.shadowRoot.getElementById('waDlg');
       var d = this._data;
-      if (!this._share || !this._share.length || !d || d.view !== 'month') {
+      if (!this._share || !this._share.length || !isMonth(d)) {
         if (dlg && dlg.parentNode) {
           try { if (dlg.open) dlg.close(); } catch (e) { /* already closed */ }
           dlg.parentNode.removeChild(dlg);

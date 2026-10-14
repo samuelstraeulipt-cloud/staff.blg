@@ -785,7 +785,9 @@ ok('...until the fresh screen replaces it', await page.evaluate(() =>
 
 console.log('\n— the group message is a pop-up you cannot miss —');
 {
-  const MD = st => ({ view: 'month', me: ME, ym: '2027-03', today: '2027-03-01',
+  /* No `view` here, exactly as getMyMonth sends it: the first build of the
+     pop-up checked for view === 'month' and so never opened on the live site. */
+  const MD = st => ({ me: ME, ym: '2027-03', today: '2027-03-01',
     items: Array.from({ length: 18 }, (_, k) => {
       const day = String(k + 2).padStart(2, '0');
       const out = st && st[day];
