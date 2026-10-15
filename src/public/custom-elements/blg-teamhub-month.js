@@ -2246,22 +2246,33 @@
          covered:[{sessionId, name, date, time, coveredByName, ownerName}] } */
     _admin(d, message, state) {
       var self = this;
-      var ym = d.ym, c = d.counts || {};
+      var c = d.counts || {}, today = d.today || '';
       /* Who a cancel would take it from, when the queue row is already covered. */
       var coveredName = function (s) {
         var a = (s.requests || []).filter(function (r) { return r.approved; })[0];
         return a ? a.name : null;
       };
-      var queue = d.queue || [], noAsk = d.noAsk || [], covered = d.covered || [];
-      var monthName = MONTHS[Number(ym.split('-')[1]) - 1];
+      /* One list over all dates, not a month at a time: what is coming first,
+         by date, then the last 30 days for reference. */
+      var upcomingFirst = function (list) {
+        var next = [], gone = [];
+        var when = function (a, b) {
+          return String(a.date).localeCompare(String(b.date)) ||
+            String(a.time || '').localeCompare(String(b.time || ''));
+        };
+        (list || []).forEach(function (s) { (s.date >= today ? next : gone).push(s); });
+        return next.sort(when).concat(gone.sort(when).reverse());
+      };
+      var queue = upcomingFirst(d.queue), noAsk = upcomingFirst(d.noAsk),
+        covered = upcomingFirst(d.covered);
       var out = [this._flash(message, state), '<div class="page">'];
 
       out.push(this._head('Admin',
         'Absences record themselves — approving cover is the part that needs you'));
 
-      out.push('<div class="card" style="margin-bottom:16px">' +
-        monthBar(ym, 'Everything on this page is ' + monthName + ' ' + ym.split('-')[0] +
-          ' — switch month and the lists change with it.') + '</div>');
+      out.push('<div class="hint" style="margin:-4px 0 14px">Every recorded absence from ' +
+        (d.from ? esc(fmtShort(d.from)) : 'the last 30 days') +
+        ' on, soonest first — whatever month it falls in.</div>');
 
       out.push('<div class="stats">' +
         statTile(queue.length, 'To approve', queue.length ? 'var(--warn)' : null) +
@@ -2299,7 +2310,7 @@
       }
 
       out.push('<div class="card" style="margin-bottom:16px"><div class="card-head">' +
-        '<h2 class="card-title">Waiting for you — ' + esc(monthName) + '</h2>' +
+        '<h2 class="card-title">Waiting for you</h2>' +
         '<span class="pill ' + (queue.length ? 'pill-warn' : 'pill-ok') + '">' + queue.length +
         ' ' + (queue.length === 1 ? 'session' : 'sessions') + '</span></div>');
 
@@ -2346,7 +2357,7 @@
 
       if (noAsk.length) {
         out.push('<div class="card" style="margin-bottom:16px"><div class="card-head">' +
-          '<h2 class="card-title">Nobody has asked yet — ' + esc(monthName) + '</h2>' +
+          '<h2 class="card-title">Nobody has asked yet</h2>' +
           '<span class="pill pill-bad">' + noAsk.length + '</span></div>');
         noAsk.forEach(function (s) {
           out.push('<div class="row">' +
@@ -2365,7 +2376,7 @@
       var unstaffed = d.unstaffed || [];
       if (unstaffed.length) {
         out.push('<div class="card" style="margin-bottom:16px"><div class="card-head">' +
-          '<h2 class="card-title">Kein Frontdesk — ' + esc(monthName) + '</h2>' +
+          '<h2 class="card-title">Kein Frontdesk</h2>' +
           '<span class="pill pill-neutral">' + unstaffed.length + '</span></div>');
         unstaffed.forEach(function (s) {
           out.push('<div class="row">' +
@@ -2381,7 +2392,7 @@
 
       if (covered.length) {
         out.push('<div class="card"><div class="card-head">' +
-          '<h2 class="card-title">Covered — ' + esc(monthName) + '</h2>' +
+          '<h2 class="card-title">Covered</h2>' +
           '<span class="pill pill-ok">' + covered.length + '</span></div>');
         covered.forEach(function (s) {
           out.push('<div class="row">' +

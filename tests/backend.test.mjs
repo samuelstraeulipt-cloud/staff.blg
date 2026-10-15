@@ -513,6 +513,21 @@ const fdQ2 = await T.getAdminQueue(pastYM);
 ok('a class nobody covered is NOT quietly settled by the date passing',
   fdQ2.noAsk.some(x => x.date === past) && fdQ2.counts.uncovered === 1, fdQ2.counts);
 
+console.log('\n— the admin list spans months —');
+world(); as('cara');
+{
+  const iso = n => { const d = new Date(); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const add = (id, date) => db.Sessions.push({ _id: id, title: 'class:c1:' + date, kind: 'class',
+    refId: 'c1', date, ownerId: 'anna', status: 'open', coveredById: null });
+  add('soon', iso(3)); add('later', iso(45)); add('recent', iso(-10)); add('old', iso(-45));
+  const all = await T.getAdminQueue();
+  const ids = all.noAsk.map(x => x.sessionId);
+  ok('it lists absences in the coming months without paging', ids.includes('soon') && ids.includes('later'), ids);
+  ok('...and the last 30 days', ids.includes('recent'), ids);
+  ok('...but not older ones', !ids.includes('old'), ids);
+  ok('...soonest first', ids.indexOf('recent') < ids.indexOf('soon') && ids.indexOf('soon') < ids.indexOf('later'), ids);
+}
+
 console.log('\n— a blank email is not a person —');
 world(); as('cara');
 db.Staff.push({ _id: 'blank', title: 'Alessia', email: '', roles: 'frontdesk,coach',

@@ -943,6 +943,26 @@ console.log('\n— the group message is a pop-up you cannot miss —');
     await page.evaluate(`!!${root}.querySelector('[data-doubtful]')`));
 }
 
+console.log('\n— Admin is one list over all dates, not a month —');
+{
+  const sr = 'document.querySelector("blg-teamhub-month").shadowRoot';
+  await set({ view: 'admin', me: ME, from: '2027-02-15', today: '2027-03-30', queue: [],
+    noAsk: [
+      { sessionId: 'old', name: 'Old One', date: '2027-03-03', time: '18:00', ownerName: 'Anna Meier', status: 'open' },
+      { sessionId: 'n2', name: 'Early April', date: '2027-04-02', time: '07:00', ownerName: 'Bea Lang', status: 'open' },
+      { sessionId: 'n1', name: 'End of March', date: '2027-03-31', time: '18:00', ownerName: 'Anna Meier', status: 'open' }],
+    covered: [], unstaffed: [], counts: { uncovered: 3, handed: 3 } }, 'ready', '');
+  await page.waitForTimeout(40);
+  const txt = await page.evaluate(`${sr}.textContent`);
+  ok('no month switcher on Admin', !(await page.evaluate(`!!${sr}.querySelector('[data-ym]')`)));
+  ok('next month\'s absence is listed next to this month\'s',
+    txt.includes('End of March') && txt.includes('Early April'));
+  ok('...soonest first, the past after',
+    txt.indexOf('End of March') < txt.indexOf('Early April') &&
+    txt.indexOf('Early April') < txt.indexOf('Old One'));
+  ok('...and the headings name no month', !/Nobody has asked yet —/.test(txt));
+}
+
 console.log('\n— an admin is handed the note for the person they assigned —');
 {
   const sr = 'document.querySelector("blg-teamhub-month").shadowRoot';

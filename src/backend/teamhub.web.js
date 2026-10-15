@@ -925,16 +925,21 @@ export const markSportsNowDone = webMethod(Permissions.SiteMember, async (taskId
   return { ok: true };
 });
 
+/* One list, not a month at a time: everything from the last 30 days on, by
+   date. A month view hid next month's absences until somebody paged forward,
+   so a class on the 2nd could sit unseen until the 1st. `ym` is ignored and
+   kept only so older page code can still call this. */
+const ADMIN_LOOKBACK_DAYS = 30;
 export const getAdminQueue = webMethod(Permissions.SiteMember, async (ym) => {
   const staff = requireAdmin(await requireStaff());
-  if (!isYm(ym)) ym = todayISO().slice(0, 7);
   const today = todayISO();
+  const from = addDays(today, -ADMIN_LOOKBACK_DAYS);
   const plan = await loadPlan();
   const classOf = {}; plan.classes.forEach(c => { classOf[c._id] = c; });
   const shiftOf = {}; plan.shifts.forEach(s => { shiftOf[s._id] = s; });
 
   const seRes = await findAll(
-    wixData.query('Sessions').startsWith('date', ym).ascending('date'), 600);
+    wixData.query('Sessions').ge('date', from).ascending('date'), 1000);
   const sessions = seRes.items.filter(visibleTo(staff, testIdsOf(plan.staff)));
   const ids = sessions.map(s => s._id);
   const reqRes = await findIn('CoverRequests', 'sessionId', ids, 600);
@@ -1011,7 +1016,7 @@ export const getAdminQueue = webMethod(Permissions.SiteMember, async (ym) => {
       .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
   }
 
-  return { me: pub(staff), view: 'admin', ym, today, queue, noAsk, covered: coveredList,
+  return { me: pub(staff), view: 'admin', from, today, queue, noAsk, covered: coveredList,
            unstaffed, sportsnow,
     counts: {
       /* Settled ones do not count: neither the ones an admin closed nor the
