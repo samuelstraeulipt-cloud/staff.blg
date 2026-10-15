@@ -387,6 +387,7 @@ async function act(run, note) {
        behind every tap, so the next tap or tab waited for the lot. */
     await load(typeof said === 'string' ? said : note);
   } catch (err) {
+    if (mine !== gen) return;     // signed out meanwhile: the sign-in screen stays clean
     busy = false;
     fail(err);
   }
@@ -440,6 +441,7 @@ async function onAbsences(picks) {
     busy = false;
     await load(handoverNote(res));
   } catch (err) {
+    if (mine !== gen) return;     // signed out meanwhile: the sign-in screen stays clean
     busy = false;
     fail(err);
   }
