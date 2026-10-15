@@ -959,7 +959,7 @@ export const getAdminQueue = webMethod(Permissions.SiteMember, async (ym) => {
       .map(r => (r.status === 'approved' && s.coveredById !== r.staffId)
         ? { ...r, status: 'pending' } : r);
     const undecided = all.some(r => r.status === 'pending');
-    const base = { sessionId: s._id, name: d.name, date: s.date, time: d.time,
+    const base = { sessionId: s._id, kind: s.kind, name: d.name, date: s.date, time: d.time,
                    ownerName: nameOfRow(plan.byId[s.ownerId]), status: s.status,
                    test: isTestSession(s) };
 

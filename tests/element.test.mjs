@@ -943,6 +943,97 @@ console.log('\n— the group message is a pop-up you cannot miss —');
     await page.evaluate(`!!${root}.querySelector('[data-doubtful]')`));
 }
 
+console.log('\n— an admin is handed the note for the person they assigned —');
+{
+  const sr = 'document.querySelector("blg-teamhub-month").shadowRoot';
+  const tell = () => page.evaluate(`(() => { const d = ${sr}.getElementById('tellDlg');
+    if (!d) return null;
+    return { open: d.open, title: (d.querySelector('.wa-title') || {}).textContent,
+      text: (d.querySelector('#waText') || {}).textContent || '',
+      href: (d.querySelector('a[href^="https://wa.me/"]') || {}).href || '' }; })()`);
+  const Q = (kind, approved) => ({ view: 'admin', me: ME, ym: '2027-03', today: '2027-03-01',
+    queue: [{ sessionId: 'q1', kind, name: kind === 'class' ? 'Team Up' : 'Front desk — Dienstag',
+      date: '2027-03-02', time: kind === 'class' ? '10:00' : '17:00–19:30',
+      ownerName: 'Alessandra Giunta', status: approved ? 'covered' : 'open',
+      requests: [
+        { requestId: 'r1', name: 'Kim Nguyen', colour: '#123456', kind: 'want', at: Date.now(), approved },
+        { requestId: 'r2', name: 'Bea Lang', colour: '#654321', kind: 'want', at: Date.now(), approved: false }] }],
+    noAsk: [], covered: [], counts: { uncovered: 1, handed: 1 } });
+  const assign = async (kind, fresh) => {
+    await set(Q(kind, false), 'ready', '');
+    await page.waitForTimeout(30);
+    await page.evaluate(`${sr}.querySelector('[data-assign="r1"]').click()`);
+    await set(null, 'loading', null);
+    await page.waitForTimeout(20);
+    ok(kind + ': nothing pops up before the assignment has saved', !(await tell()));
+    await set(fresh, 'ready', 'Assigned. They can see it on their month now.');
+    await page.waitForTimeout(350);
+    return tell();
+  };
+
+  let t = await assign('class', Q('class', true));
+  ok('assigning a class opens the note once it saved', t && t.open && /let Kim know/.test(t.title), t);
+  ok('...with the agreed wording, first names only',
+    t && t.text === 'Hi Kim, you’re covering Team Up, Tue 2 Mar, 10:00 (for Alessandra). ' +
+      'Thanks! It’s in your TeamHub → My month and I updated SportsNow.', t && t.text);
+  ok('...and a WhatsApp button carrying that text',
+    t && decodeURIComponent(t.href.split('text=')[1] || '') === t.text, t && t.href);
+  await page.evaluate(`${sr}.querySelector('[data-closetell]').click()`);
+  await page.waitForTimeout(30);
+  ok('Close removes it', !(await tell()));
+
+  t = await assign('shift', Q('shift', true));
+  ok('a front-desk cover leaves SportsNow out',
+    t && t.text === 'Hi Kim, you’re covering Front desk — Dienstag, Tue 2 Mar, 17:00–19:30 ' +
+      '(for Alessandra). Thanks! It’s in your TeamHub → My month.', t && t.text);
+  await page.evaluate(`${sr}.querySelector('[data-closetell]').click()`);
+
+  /* The only request: once assigned the session leaves the queue for "covered". */
+  const solo = Q('class', false); solo.queue[0].requests = [solo.queue[0].requests[0]];
+  await set(solo, 'ready', '');
+  await page.waitForTimeout(30);
+  await page.evaluate(`${sr}.querySelector('[data-assign="r1"]').click()`);
+  await set({ view: 'admin', me: ME, ym: '2027-03', today: '2027-03-01', queue: [], noAsk: [],
+    covered: [{ sessionId: 'q1', name: 'Team Up', date: '2027-03-02', time: '10:00',
+      coveredByName: 'Kim Nguyen', ownerName: 'Alessandra Giunta' }],
+    counts: { uncovered: 0, handed: 1 } }, 'ready', 'Assigned.');
+  await page.waitForTimeout(350);
+  ok('...also when the session moves to Covered', !!((await tell()) || {}).open);
+  await page.evaluate(`${sr}.querySelector('[data-closetell]').click()`);
+
+  await set(Q('class', false), 'ready', '');
+  await page.waitForTimeout(30);
+  await page.evaluate(`${sr}.querySelector('[data-assign="r1"]').click()`);
+  await set(null, 'error', 'Someone has already been assigned.');
+  await page.waitForTimeout(30);
+  await set(Q('class', false), 'ready', null);
+  await page.waitForTimeout(350);
+  ok('a refused assignment offers no note', !(await tell()));
+
+  /* Front desk: picking a person for a coming shift. */
+  const FD2 = Object.assign({}, FD, { staff: [{ id: 'anna', name: 'Anna Meier' }, { id: 'lynn', name: 'Lynn' }] });
+  await set(FD2, 'ready', '');
+  await page.waitForTimeout(30);
+  await page.evaluate(`(() => { const s = ${sr}.querySelector('select[data-fd="s1|2027-03-09"]');
+    s.value = 'lynn'; s.dispatchEvent(new Event('change', { bubbles: true, composed: true })); })()`);
+  const FD3 = JSON.parse(JSON.stringify(FD2));
+  FD3.rows[1].staffId = 'lynn'; FD3.rows[1].staffName = 'Lynn'; FD3.rows[1].actualId = 'lynn';
+  await set(FD3, 'ready', 'Shift updated.');
+  await page.waitForTimeout(350);
+  t = await tell();
+  ok('putting someone on a coming front-desk shift opens the note',
+    t && t.text === 'Hi Lynn, you’re on front desk, Tue 9 Mar, 16:00–20:00 (for Anna). ' +
+      'Thanks! It’s in your TeamHub → My month.', t && t.text);
+  await page.evaluate(`${sr}.querySelector('[data-closetell]').click()`);
+  await set(FD3, 'ready', '');
+  await page.waitForTimeout(30);
+  await page.evaluate(`(() => { const s = ${sr}.querySelector('select[data-fd="s1|2027-03-09"]');
+    s.value = ''; s.dispatchEvent(new Event('change', { bubbles: true, composed: true })); })()`);
+  await set(FD2, 'ready', 'Shift updated.');
+  await page.waitForTimeout(350);
+  ok('...but not for "kein Frontdesk"', !(await tell()));
+}
+
 console.log('\n— errors —');
 ok('no page errors at all', errs.length === 0, errs.slice(0, 4));
 

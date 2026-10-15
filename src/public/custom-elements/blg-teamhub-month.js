@@ -1048,6 +1048,20 @@
     return lines.join('\n');
   }
 
+  /* The note an admin sends the person they just put on a session. WhatsApp
+     cannot be sent from here on its own (that needs Meta's business API), so
+     the admin gets the text ready-made and one tap opens WhatsApp with it. */
+  function firstName(n) { return String(n || '').trim().split(/\s+/)[0] || ''; }
+  function tellText(t) {
+    var hi = 'Hi' + (firstName(t.to) ? ' ' + firstName(t.to) : '') + ', ';
+    var when = fmtShort(t.date) + (t.time ? ', ' + t.time : '');
+    var forWho = firstName(t.forName) ? ' (for ' + firstName(t.forName) + ')' : '';
+    var what = t.desk ? 'you’re on front desk, ' + when
+                      : 'you’re covering ' + t.name + ', ' + when;
+    return hi + what + forWho + '. Thanks! It’s in your TeamHub → My month' +
+      (t.kind === 'class' ? ' and I updated SportsNow.' : '.');
+  }
+
   /* ========================================================= the element */
 
   class BlgTeamhub extends HTMLElement {
@@ -1063,6 +1077,7 @@
       this._shareFrom = null;    // 'record' | 'message' — which button opened it
       this._shareMissed = 0;     // picks that did not save, when some did
       this._shareAnim = false;   // slide in once, not on every redraw
+      this._tell = null;         // admin: the "let them know" note, once the assignment saved
       this._confirm = null;      // sessionId whose cancel is one click from real
       this._authMode = null;     // 'login' | 'access' on the sign-in screen
       this._authEmail = '';      // kept across redraws; the password never is
@@ -1136,6 +1151,7 @@
           this._confirm = null;  // and no half-pressed buttons
           this._authMode = null; // the page decides which sign-in screen comes next
           this._sending = null;  // the answer is in: the tapped button is done
+          if (this._tell && this._tell.state === 'saving') this._settleTell(this._data);
           if (this._shareState === 'saving' && isMonth(this._data)) {
             this._settleShare(this._data);
           } else if (!isMonth(this._data)) {
@@ -1154,6 +1170,7 @@
       if (name === 'state' && newV === 'error') {
         this._sending = null;
         if (this._shareState === 'saving') this._shareState = 'failed';
+        if (this._tell && this._tell.state === 'saving') this._tell = null;   // the banner says why
       }
       this._render();
     }
@@ -1220,7 +1237,7 @@
       var el = ev.target && ev.target.closest
         ? ev.target.closest('[data-ym],[data-thismonth],[data-week],[data-thisweek],' +
             '[data-pick],[data-clear],[data-record],[data-undo],[data-msg],' +
-            '[data-closeshare],[data-copy],[data-copytable],[data-go],[data-req],' +
+            '[data-closeshare],[data-closetell],[data-copy],[data-copytable],[data-go],[data-req],' +
             '[data-withdraw],[data-assign],[data-decline],[data-unassign],' +
             '[data-askcancel],[data-nocancel],[data-cancel],[data-authmode],[data-signout],[data-sndone],' +
             '[data-plancheck],[data-planapply],[data-planclear],[data-sncheck],' +
@@ -1268,7 +1285,10 @@
         return;
       }
       if (el.dataset.withdraw) { this._sendingFor(el, 'Withdrawing…'); this._emit('teamhub:withdraw', { sessionId: el.dataset.withdraw }); return; }
-      if (el.dataset.assign)   { this._sendingFor(el, 'Assigning…'); this._emit('teamhub:assign',   { requestId: el.dataset.assign }); return; }
+      if (el.dataset.assign)   {
+        this._tell = this._tellForRequest(d, el.dataset.assign);
+        this._sendingFor(el, 'Assigning…'); this._emit('teamhub:assign',   { requestId: el.dataset.assign }); return;
+      }
       if (el.dataset.decline)  { this._sendingFor(el, 'Declining…'); this._emit('teamhub:decline',  { requestId: el.dataset.decline }); return; }
       if (el.dataset.unassign) { this._sendingFor(el, 'Changing…'); this._emit('teamhub:unassign', { sessionId: el.dataset.unassign }); return; }
       if (el.dataset.sndone)   { this._sendingFor(el, 'Saving…'); this._emit('teamhub:sndone',   { taskId: el.dataset.sndone }); return; }
@@ -1330,6 +1350,7 @@
         return;
       }
       if (el.dataset.closeshare) { this._closeShare(); return; }
+      if (el.dataset.closetell) { this._closeTell(); return; }
 
       /* Cancelling is two clicks: arm, then confirm. Arming another row disarms
          the first, so only one button is ever live at a time. */
@@ -1407,6 +1428,7 @@
       /* Front desk: an admin changing who is on a shift. */
       if (el.dataset && el.dataset.fd) {
         var bits2 = el.dataset.fd.split('|');
+        this._tell = this._tellForShift(this._data, bits2[0], bits2[1], el.value || null);
         this._emit('teamhub:setshift', {
           shiftId: bits2[0], date: bits2[1], staffId: el.value || null
         });
@@ -1580,6 +1602,109 @@
         '<style>' + CSS + '</style><div class="app">' + chrome + body + bar + '</div>';
       this._markSending();
       this._syncShare();
+      this._syncTell();
+    }
+
+    /* ------------------------------------------- telling the assigned person */
+    _tellForRequest(d, requestId) {
+      var found = null;
+      ((d && d.queue) || []).forEach(function (s) {
+        (s.requests || []).forEach(function (r) {
+          if (r.requestId === requestId) found = { s: s, r: r };
+        });
+      });
+      if (!found) return null;
+      return { state: 'saving', view: 'admin', requestId: requestId,
+        sessionId: found.s.sessionId, kind: found.s.kind || 'class', name: found.s.name,
+        date: found.s.date, time: found.s.time, to: found.r.name, forName: found.s.ownerName };
+    }
+
+    _tellForShift(d, shiftId, date, staffId) {
+      if (!d || !staffId || date < d.today) return null;     // nobody to tell, or already past
+      var row = (d.rows || []).filter(function (r) {
+        return r.shiftId === shiftId && r.date === date;
+      })[0];
+      var who = (d.staff || []).filter(function (p) { return String(p.id) === String(staffId); })[0];
+      if (!row || !who || String(row.staffId) === String(staffId)) return null;
+      return { state: 'saving', view: 'frontdesk', shiftId: shiftId, staffId: staffId,
+        kind: 'shift', desk: true, date: date,
+        time: (row.start && row.end) ? row.start + '–' + row.end : '',
+        to: who.name, forName: row.staffId ? row.staffName : '' };
+    }
+
+    /* The note only appears once the fresh screen shows the assignment really
+       stuck — never for a tap that the server refused. */
+    _settleTell(d) {
+      var t = this._tell;
+      if (!d || (d.view || 'month') !== t.view) { this._tell = null; return; }
+      var ok = false;
+      if (t.view === 'admin') {
+        var s = (d.queue || []).filter(function (x) { return x.sessionId === t.sessionId; })[0];
+        if (!s) {
+          ok = (d.covered || []).some(function (x) { return x.sessionId === t.sessionId; });
+        } else {
+          ok = (s.requests || []).some(function (r) { return r.requestId === t.requestId && r.approved; });
+        }
+      } else {
+        ok = (d.rows || []).some(function (r) {
+          return r.shiftId === t.shiftId && r.date === t.date && String(r.staffId) === String(t.staffId);
+        });
+      }
+      if (ok) { t.state = 'ready'; t.anim = true; } else this._tell = null;
+    }
+
+    _closeTell() {
+      this._tell = null;
+      var dlg = this.shadowRoot && this.shadowRoot.getElementById('tellDlg');
+      if (dlg) {
+        try { if (dlg.open) dlg.close(); } catch (e) { /* already closed */ }
+        if (dlg.parentNode) dlg.parentNode.removeChild(dlg);
+      }
+    }
+
+    _syncTell() {
+      if (!this.shadowRoot) return;
+      var dlg = this.shadowRoot.getElementById('tellDlg');
+      var t = this._tell;
+      if (!t || t.state !== 'ready') {
+        if (dlg && dlg.parentNode && !t) {
+          try { if (dlg.open) dlg.close(); } catch (e) { /* already closed */ }
+          dlg.parentNode.removeChild(dlg);
+        }
+        return;
+      }
+      var self = this;
+      if (!dlg) {
+        dlg = document.createElement('dialog');
+        dlg.id = 'tellDlg';
+        dlg.className = 'wa-dlg';
+        dlg.setAttribute('aria-labelledby', 'tellTitle');
+        dlg.addEventListener('cancel', function (e) { e.preventDefault(); self._closeTell(); });
+        dlg.addEventListener('click', function (e) { if (e.target === dlg) self._closeTell(); });
+        this.shadowRoot.appendChild(dlg);
+      }
+      var text = tellText(t);
+      var first = firstName(t.to) || 'them';
+      if (t.anim) dlg.classList.add('wa-in');
+      dlg.innerHTML = '<div class="wa-box" role="document">' +
+        '<h2 class="wa-title" id="tellTitle"><span class="wa-ok">✓</span> Assigned — let ' +
+          esc(first) + ' know</h2>' +
+        '<p class="wa-sub">WhatsApp opens with this message; pick ' + esc(first) +
+          ' as the chat and send.</p>' +
+        '<div class="wa" id="waText">' + esc(text) + '</div>' +
+        '<div class="wa-actions">' +
+          '<a class="btn btn-primary" target="_blank" rel="noopener" href="https://wa.me/?text=' +
+            encodeURIComponent(text) + '">Open WhatsApp</a>' +
+          '<button class="btn btn-dark" data-copy="1">Copy message</button>' +
+          '<button class="btn btn-quiet" data-closetell="1">Close</button>' +
+        '</div></div>';
+      if (!dlg.open) {
+        try { dlg.showModal(); } catch (e) { dlg.setAttribute('open', ''); }
+      }
+      if (t.anim) {
+        t.anim = false;
+        setTimeout(function () { dlg.classList.remove('wa-in'); }, 300);
+      }
     }
 
     /* ------------------------------------------------ the group message */
