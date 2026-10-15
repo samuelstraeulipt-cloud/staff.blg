@@ -174,6 +174,11 @@ async function requireStaff() {
 }
 
 const isAdmin = s => list(s.roles).includes('admin');
+/* The front desk team leader ("fdlead" in Staff.roles): may correct the hours
+   on any front desk shift, not only her own. Who works a shift and
+   "kein Frontdesk" stay with the admins. The hours still count for whoever
+   actually worked it. */
+const isFdLead = s => list(s.roles).includes('fdlead');
 const pub = s => ({
   id: s._id, name: s.title || '', first: (s.title || '').split(' ')[0],
   roles: list(s.roles), disciplines: list(s.disciplines), colour: safeColour(s.colour),
@@ -531,7 +536,7 @@ export const logHours = webMethod(Permissions.SiteMember, async (shiftId, date, 
   if (!isFinite(h) || h < 0 || h > 24) throw new Error('BAD_HOURS');
   h = Math.round(h * 4) / 4;                            // quarter hours, like the sheet
 
-  if (!isAdmin(staff) && !(await worksShift(staff, shiftId, date))) throw new Error('NOT_YOURS');
+  if (!isAdmin(staff) && !isFdLead(staff) && !(await worksShift(staff, shiftId, date))) throw new Error('NOT_YOURS');
 
   const shift = await wixData.get('Shifts', shiftId, OPT);
   if (!shift) throw new Error('NOT_FOUND');
@@ -1191,7 +1196,7 @@ export const getFrontDesk = webMethod(Permissions.SiteMember, async (ym) => {
            Sent so the screen can redo its own totals when somebody edits a
            number, instead of showing a figure that no longer adds up. */
         actualId: actual || null, closed: shiftUnstaffed(sess, today),
-        status, past, canLogHours: canEdit || actual === staff._id });
+        status, past, canLogHours: canEdit || isFdLead(staff) || actual === staff._id });
     });
   });
 
