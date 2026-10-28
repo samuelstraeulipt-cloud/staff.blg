@@ -340,7 +340,10 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
     }
     if (row.date < today && state === 'planned') state = 'done';
     items.push({ ...row, state, note,
-      sessionId: sess ? sess._id : null, selectable: state === 'planned',
+      sessionId: sess ? sess._id : null,
+      /* A session you are covering can be given back the same way you would
+         hand over your own: tick it and record the absence. */
+      selectable: state === 'planned' || (state === 'covering' && row.date >= today),
       requests: sess ? (reqCount[sess._id] || 0) : 0 });
   };
 
@@ -472,7 +475,7 @@ export const recordAbsences = webMethod(Permissions.SiteMember, async (picks) =>
   const assignAt = {}; aRes.items.forEach(a => {
     assignAt[`${a.shiftId}|${a.date}`] = plan.idOfEmail[mail(a.staffEmail)] || null;
   });
-  const already = {}; dupRes.items.forEach(s => { already[s.title] = true; });
+  const already = {}; dupRes.items.forEach(s => { already[s.title] = s; });
 
   /* Ownership is decided here, never from the payload. For a class that means
      SportsNow: it has to be running that day, and the coach it names has to be
@@ -485,9 +488,18 @@ export const recordAbsences = webMethod(Permissions.SiteMember, async (picks) =>
      fact gone nowhere. */
   const asId = classOwnerFor(staff, plan.staff);
   const refused = { already: 0, notRunning: 0, notYours: 0, unknown: 0 };
-  const rows = [];
+  const rows = [], giveBack = [];
   want.forEach(w => {
-    if (already[w.title]) { refused.already++; return; }
+    const had = already[w.title];
+    /* A session you were given to cover and now cannot make either. It goes
+       back on the board, still the owner's handover, for an admin to assign
+       again — the same state `unassignCover` leaves it in. Without this a
+       coverer had no way out at all: the row was not tickable, and
+       `withdrawRequest` refuses once the request has been approved. */
+    if (had && had.status === 'covered' && had.coveredById === staff._id) {
+      giveBack.push(had); return;
+    }
+    if (had) { refused.already++; return; }
     const row = w.kind === 'class' ? classOf[w.refId] : shiftOf[w.refId];
     if (!row) { refused.unknown++; return; }
     let owner;
@@ -503,12 +515,32 @@ export const recordAbsences = webMethod(Permissions.SiteMember, async (picks) =>
     rows.push({ title: w.title, kind: w.kind, refId: w.refId, date: w.date,
       ownerId: staff._id, status: 'open', coveredById: null });
   });
-  if (!rows.length) return { created: 0, asked: want.length, refused };
+  const released = await releaseCover(staff, giveBack);
+  if (!rows.length) return { created: 0, released, asked: want.length, refused };
 
   const res = await wixData.bulkInsert('Sessions', rows, OPT);
   return { created: res && typeof res.inserted === 'number' ? res.inserted : rows.length,
-           asked: want.length, refused };
+           released, asked: want.length, refused };
 });
+
+/* Hands sessions this person was covering back to the board. The session is
+   written first, as in `assignCover`: it is what every screen reads. Then their
+   own request goes — it was the approved one, and left behind it would sit in
+   the admin's list as a fresh offer from somebody who has just said no. Other
+   people's requests stay, so an admin can assign one of them straight away.
+   SportsNow should show the planned coach again until somebody new is on it. */
+async function releaseCover(staff, sessions) {
+  if (!sessions.length) return 0;
+  /* Copies, never the query's own items: assigning to those is what broke the
+     front desk on 14 October. */
+  const open = sessions.map(s => ({ ...s, status: 'open', coveredById: null }));
+  await Promise.all(open.map(s => wixData.update('Sessions', s, OPT)));
+  const mine = await findIn('CoverRequests', 'title',
+    open.map(s => `${s._id}|${staff._id}`), 100);
+  await Promise.all(mine.items.map(r => wixData.remove('CoverRequests', r._id, OPT)));
+  for (const s of open) await syncSportsNow(s, s.ownerId);
+  return open.length;
+}
 
 /* Undoing is refused once cover is assigned — doing it silently would strand
    whoever picked the session up. */

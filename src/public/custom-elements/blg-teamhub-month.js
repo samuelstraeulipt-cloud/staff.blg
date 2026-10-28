@@ -1017,11 +1017,20 @@
     return !!a && !!b && !!a.me && !!b.me && a.me.id === b.me.id &&
       (a.view || 'month') === (b.view || 'month') && a.ym === b.ym;
   }
+  /* What can be ticked on My month: your own planned sessions, and the ones
+     you are covering — a coverer who cannot make it after all gives it back
+     the same way (the backend puts it back on the board). Past dates and
+     classes with no plan row to hang a handover on never. */
+  function tickable(i, today) {
+    return (i.state === 'planned' || i.state === 'covering') &&
+      i.date >= today && !!i.refId;
+  }
+
   function keepTicks(sel, d) {
     var out = {};
     (d.items || []).forEach(function (i) {
       var k = i.kind + ':' + i.refId + ':' + i.date;
-      if (sel[k] && i.state === 'planned' && i.date >= d.today && i.refId) {
+      if (sel[k] && tickable(i, d.today)) {
         out[k] = { kind: i.kind, refId: i.refId, date: i.date, _item: i };
       }
     });
@@ -1713,12 +1722,18 @@
        "needs cover" went out. Only those go into the message, so nobody asks
        the group to cover a session TeamHub never recorded. */
     _settleShare(d) {
-      var fresh = {};
+      var fresh = {}, still = {};
       (d.items || []).forEach(function (i) {
-        if (i.state === 'needsCover') fresh[i.kind + ':' + i.refId + ':' + i.date] = i;
+        var k = i.kind + ':' + i.refId + ':' + i.date;
+        if (i.state === 'needsCover') fresh[k] = i;
+        if (i.state === 'covering') still[k] = true;
       });
+      /* One you were covering is given back when it has left your month — it
+         is the owner's handover again, open on the board. */
       var ok = (this._share || []).map(function (i) {
-        return fresh[i.kind + ':' + i.refId + ':' + i.date];
+        var k = i.kind + ':' + i.refId + ':' + i.date;
+        if (i.state === 'covering') return still[k] ? null : i;
+        return fresh[k];
       }).filter(Boolean);
       this._shareMissed = (this._share || []).length - ok.length;
       if (ok.length) { this._share = ok; this._shareState = 'ready'; }
@@ -2094,9 +2109,10 @@
             '<div class="row-s">' + esc(fmtShort(i.date)) + ' · ' + esc(i.time) +
             (i.note ? ' · for ' + esc(shortName(i.note)) : '') + '</div></div></div>');
         });
+        out.push('<p class="note-line" style="margin:0">Can’t make one after all? Tick it in ' +
+          'the list and record your absence — it goes back on the board for cover.</p>');
       } else {
-        out.push('<div class="empty">Nothing yet. Have a look at <strong>Open classes</strong> ' +
-          'once it is built.</div>');
+        out.push('<div class="empty">Nothing yet. Have a look at <strong>Open classes</strong>.</div>');
       }
       out.push('</div>');
 
@@ -2113,7 +2129,7 @@
 
       if (i.state === 'covering') {
         state = '<span class="pill pill-ok">You’re covering</span>';
-        cls.push('off');
+        if (i.date < today) cls.push('off');
       } else if (i.state === 'needsCover') {
         state = '<span class="pill pill-bad">Needs cover</span>';
         cls.push('off');
@@ -2133,9 +2149,7 @@
          handover on, and a tick box that silently does nothing is worse than
          no tick box. Monday's job gives it a row and the box comes back. */
       var orphan = i.kind === 'class' && !i.refId;
-      var selectable = i.state !== 'covering' && i.state !== 'needsCover' &&
-                       i.state !== 'covered' && i.state !== 'closed' &&
-                       i.date >= today && !orphan;
+      var selectable = tickable(i, today);
       if (orphan && !state) state = '<span class="pill pill-neutral">Not in the plan yet</span>';
       if (picked) cls.push('sel');
 

@@ -455,6 +455,9 @@ function handoverNote(res) {
   const s = k => k + ' session' + (k === 1 ? '' : 's');
   const parts = [];
   if (n) parts.push(s(n) + ' recorded — the team can see ' + (n === 1 ? 'it' : 'them') + ' on the board now.');
+  const g = (res && res.released) || 0;
+  if (g) parts.push(s(g) + ' you were covering ' + (g === 1 ? 'is' : 'are') +
+    ' back on the board — an admin will find someone else.');
   if (r.already) parts.push(s(r.already) + ' already handed over.');
   const failed = (r.notRunning || 0) + (r.notYours || 0) + (r.unknown || 0);
   if (failed) {

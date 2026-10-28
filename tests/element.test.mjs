@@ -882,6 +882,58 @@ console.log('\n— the group message is a pop-up you cannot miss —');
   await page.setViewportSize({ width: 1280, height: 720 });
 }
 
+/* 28 October: a coverer who cannot make it after all gives it back the same
+   way they would hand over their own session. */
+{
+  console.log('\n— giving back a session you cover —');
+  const sr = 'document.querySelector("blg-teamhub-month").shadowRoot';
+  const CV = gone => ({ me: ME, ym: '2027-03', today: '2027-03-03', items: [
+    { kind: 'class', refId: 'c1', date: '2027-03-02', time: '18:00', name: 'Team Up',
+      discipline: 'group', hours: 1, plannedHours: 1, editableHours: false,
+      state: 'covering', note: 'Alessandra Giunta', sessionId: 'p1', selectable: false, requests: 0 },
+    ...(gone ? [] : [{ kind: 'class', refId: 'c2', date: '2027-03-06', time: '10:00', name: 'Team Up',
+      discipline: 'group', hours: 1, plannedHours: 1, editableHours: false,
+      state: 'covering', note: 'Alessandra Giunta', sessionId: 'v1', selectable: true, requests: 0 }])
+  ], totals: { hours: 1 } });
+  const gave = [];
+  await page.exposeFunction('noteGive', e => gave.push(e));
+  await page.evaluate(() => document.querySelector('blg-teamhub-month')
+    .addEventListener('teamhub:absences', e => window.noteGive(e.detail)));
+  await set(CV(false), 'ready', '');
+  await page.waitForTimeout(40);
+  const picks = await page.evaluate(`[...${sr}.querySelectorAll('[data-pick]')].map(n => n.dataset.pick)`);
+  ok('a coming session you cover is tickable, a past one is not',
+    picks.length === 1 && picks[0] === 'class:c2:2027-03-06', picks);
+  ok('the You’re covering card says how to give one back',
+    await page.evaluate(`${sr}.textContent.includes('Can’t make one after all?')`));
+  await page.evaluate(`${sr}.querySelector('[data-pick="class:c2:2027-03-06"]').click()`);
+  await page.evaluate(`${sr}.querySelector('[data-record]').click()`);
+  await page.waitForTimeout(40);
+  ok('Record absence sends it like any other pick',
+    gave.length === 1 && gave[0].picks[0].refId === 'c2' && gave[0].picks[0].date === '2027-03-06', gave);
+  await set(null, 'loading', null);
+  await set(CV(true), 'ready', null);
+  await set(null, null, '1 session you were covering is back on the board — an admin will find someone else.');
+  await page.waitForTimeout(40);
+  const w = await page.evaluate(`(() => { const d = ${sr}.getElementById('waDlg');
+    return d && { title: d.querySelector('.wa-title').textContent, text: (d.querySelector('#waText') || {}).textContent || '' }; })()`);
+  ok('once it has left the month the pop-up offers the group message',
+    w && /Recorded/.test(w.title) && /Sat 6 Mar|6 Mar/.test(w.text), w);
+  await page.evaluate(`${sr}.querySelector('[data-closeshare]').click()`);
+
+  /* still covering after the reload = it did not go through */
+  await set(CV(false), 'ready', '');
+  await page.evaluate(`${sr}.querySelector('[data-pick="class:c2:2027-03-06"]').click()`);
+  await page.evaluate(`${sr}.querySelector('[data-record]').click()`);
+  await set(null, 'loading', null);
+  await set(CV(false), 'ready', null);
+  await page.waitForTimeout(40);
+  const w2 = await page.evaluate(`(() => { const d = ${sr}.getElementById('waDlg');
+    return d && d.querySelector('.wa-title').textContent; })()`);
+  ok('if it is still yours afterwards, nothing is claimed', /Nothing was recorded/.test(w2 || ''), w2);
+  await page.evaluate(`${sr}.querySelector('[data-closeshare]').click()`);
+}
+
 /* 14 October review. */
 {
   console.log('\n— review 14 Oct —');

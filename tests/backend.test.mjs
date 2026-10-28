@@ -139,6 +139,57 @@ await threw('assigning a declined request', () => T.assignCover(r2._id), 'DECLIN
 as('dan');
 await threw('a coach without the discipline', () => T.requestCover(s2._id, 'want'), 'NOT_CLEARED');
 
+console.log('\n— G1: a coverer can give a covered session back —');
+for (const kind of ['class', 'shift']) {
+  const refId = kind === 'class' ? 'c1' : 's1';
+  world(); as('anna');
+  await T.recordAbsences([{ kind, refId, date: D1 }]);
+  const gs = db.Sessions[0];
+  as('bea'); await T.requestCover(gs._id, 'want');
+  as('cara'); await T.assignCover(db.CoverRequests[0]._id);
+  as('bea');
+  let bm2 = await T.getMyMonth(YM);
+  let cov = bm2.items.find(i => i.date === D1 && i.kind === kind);
+  ok(kind + ': the covering row is tickable', cov && cov.state === 'covering' && cov.selectable === true,
+    cov && [cov.state, cov.selectable]);
+  const gr = await T.recordAbsences([{ kind, refId, date: D1 }]);
+  ok(kind + ': reported as given back, not "already handed over"',
+    gr.released === 1 && gr.created === 0 && gr.refused.already === 0, gr);
+  const after = db.Sessions.find(x => x._id === gs._id);
+  ok(kind + ': the session is open again, nobody on it',
+    after && after.status === 'open' && after.coveredById === null, after);
+  ok(kind + ': still the owner\'s handover', after && after.ownerId === 'anna', after && after.ownerId);
+  ok(kind + ': the coverer\'s request is gone',
+    !db.CoverRequests.some(r => r.sessionId === gs._id && r.staffId === 'bea'));
+  bm2 = await T.getMyMonth(YM);
+  ok(kind + ': it leaves the coverer\'s month',
+    !bm2.items.some(i => i.date === D1 && i.kind === kind), bm2.items.map(i => i.date + i.kind + i.state));
+  as('anna');
+  const own = (await T.getMyMonth(YM)).items.find(i => i.date === D1 && i.kind === kind);
+  ok(kind + ': the owner sees it needing cover again', own && own.state === 'needsCover', own && own.state);
+  as('cara');
+  const q = await T.getAdminQueue(YM);
+  ok(kind + ': admin sees it uncovered', q.counts.uncovered === 1, q.counts);
+  if (kind === 'class') {
+    const t = db.SportsNowTasks.find(x => x.title === 'class:c1:' + D1);
+    ok('class: SportsNow to-do points back at the owner', t && t.targetId === 'anna' && t.status === 'done', t);
+  }
+}
+
+/* Only the person covering can give it back, and a plain duplicate is still
+   reported as one. */
+world(); as('anna');
+await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D1 }]);
+as('bea'); await T.requestCover(db.Sessions[0]._id, 'want');
+as('cara'); await T.assignCover(db.CoverRequests[0]._id);
+as('dan');
+let gr2 = await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D1 }]);
+ok('someone else cannot give it back', !gr2.released && db.Sessions[0].status === 'covered', gr2);
+as('anna');
+gr2 = await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D1 }]);
+ok('the owner re-ticking is "already handed over"', gr2.refused.already === 1 && !gr2.released, gr2);
+ok('...and Bea is still on it', db.Sessions[0].coveredById === 'bea');
+
 console.log('\n— A3: an admin can cancel a handover in one step —');
 world(); as('anna');
 await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D1 }]);
