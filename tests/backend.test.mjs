@@ -666,8 +666,20 @@ const fdLead = await T.getFrontDesk(YM);
 ok('...gets the hours box on every shift', fdLead.rows.every(r => r.canLogHours), fdLead.rows.map(r => r.canLogHours));
 ok('...the hours still count for whoever worked it',
   (fdLead.totals.find(t => t.id === 'anna') || {}).hours === 9, fdLead.totals);
-ok('...and she still cannot change who works it', fdLead.canEdit === false);
-await threw('...nor set it herself', () => T.setShiftStaff('s1', D1, 'bea'), 'NOT_ADMIN');
+ok('...and gets the who-works-it dropdown', fdLead.canEdit === true);
+await T.setShiftStaff('s1', D1, 'bea');
+ok('...can put a colleague\'s shift on someone else',
+  db.ShiftAssignments.find(a => a.title === 's1|' + D1).staffEmail === 'bea@blg.ch');
+await T.setShiftStaff('s1', D1, 'anna');
+await T.setShiftClosed('s1', D2, true);
+ok('...can set kein Frontdesk',
+  (db.Sessions.find(x => x.title === 's1:' + D2 || x.title === 'shift:s1:' + D2) || {}).status === 'closed');
+await T.setShiftClosed('s1', D2, false);
+await threw('...but still has no Admin tab', () => T.getAdminQueue(YM), 'NOT_ADMIN');
+await threw('...nor imports the plan', () => T.importShiftPlan('2027-03-02\tFD-TUE\tBea Lang', false), 'NOT_ADMIN');
+db.Staff.find(p => p._id === 'bea').roles = 'coach,frontdesk';
+await threw('plain front desk cannot set who works a shift', () => T.setShiftStaff('s1', D1, 'bea'), 'NOT_ADMIN');
+await threw('...nor kein Frontdesk', () => T.setShiftClosed('s1', D1, true), 'NOT_ADMIN');
 
 console.log('\n— front desk plan import —');
 world(); as('anna');

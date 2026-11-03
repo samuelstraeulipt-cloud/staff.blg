@@ -174,11 +174,12 @@ async function requireStaff() {
 }
 
 const isAdmin = s => list(s.roles).includes('admin');
-/* The front desk team leader ("fdlead" in Staff.roles): may correct the hours
-   on any front desk shift, not only her own. Who works a shift and
-   "kein Frontdesk" stay with the admins. The hours still count for whoever
-   actually worked it. */
+/* The front desk team leader ("fdlead" in Staff.roles) is the admin of the
+   front desk and nothing else: she corrects the hours on any shift, says who
+   works it and sets "kein Frontdesk". Classes, cover and the Admin tab stay
+   with the admins. The hours still count for whoever actually worked it. */
 const isFdLead = s => list(s.roles).includes('fdlead');
+const isFdAdmin = s => isAdmin(s) || isFdLead(s);
 const pub = s => ({
   id: s._id, name: s.title || '', first: (s.title || '').split(' ')[0],
   roles: list(s.roles), disciplines: list(s.disciplines), colour: safeColour(s.colour),
@@ -911,6 +912,10 @@ export const withdrawRequest = webMethod(Permissions.SiteMember, async (sessionI
 /* ------------------------------------------------------------------ admin */
 /* Every admin approves everything — classes and front desk alike. Being an
    admin is separate from being a coach. */
+function requireFdAdmin(staff) {
+  if (!isFdAdmin(staff)) throw new Error('NOT_ADMIN');
+  return staff;
+}
 function requireAdmin(staff) {
   if (!isAdmin(staff)) throw new Error('NOT_ADMIN');
   return staff;
@@ -1166,7 +1171,7 @@ export const getFrontDesk = webMethod(Permissions.SiteMember, async (ym) => {
   }
   if (!isYm(ym)) ym = todayISO().slice(0, 7);
   const today = todayISO();
-  const canEdit = isAdmin(staff);
+  const canEdit = isFdAdmin(staff);
   const plan = await loadPlan();
 
   const [aRes, seRes, oRes] = await Promise.all([
@@ -1233,7 +1238,7 @@ export const getFrontDesk = webMethod(Permissions.SiteMember, async (ym) => {
            Sent so the screen can redo its own totals when somebody edits a
            number, instead of showing a figure that no longer adds up. */
         actualId: actual || null, closed: shiftUnstaffed(sess, today),
-        status, past, canLogHours: canEdit || isFdLead(staff) || actual === staff._id });
+        status, past, canLogHours: canEdit || actual === staff._id });
     });
   });
 
@@ -1265,7 +1270,7 @@ export const getFrontDesk = webMethod(Permissions.SiteMember, async (ym) => {
 });
 
 export const setShiftStaff = webMethod(Permissions.SiteMember, async (shiftId, date, staffId) => {
-  requireAdmin(await requireStaff());
+  requireFdAdmin(await requireStaff());
   if (typeof shiftId !== 'string' || !isDate(date)) throw new Error('BAD_INPUT');
 
   const shift = await wixData.get('Shifts', shiftId, OPT);
@@ -1369,7 +1374,7 @@ const codeKey = v => String(v || '').replace(/\./g, '').replace(/\s+/g, ' ').tri
    before the day arrives — a Saturday the studio is shut, an evening nobody is
    needed. It is the same answer either way, so it is the same state. */
 export const setShiftClosed = webMethod(Permissions.SiteMember, async (shiftId, date, closed) => {
-  const me = requireAdmin(await requireStaff());
+  const me = requireFdAdmin(await requireStaff());
   if (typeof shiftId !== 'string' || !isDate(date)) throw new Error('BAD_INPUT');
   const shift = await wixData.get('Shifts', shiftId, OPT);
   if (!shift || Number(shift.weekday) !== weekdayOf(date)) throw new Error('BAD_INPUT');
