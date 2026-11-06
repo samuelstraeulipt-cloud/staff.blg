@@ -529,7 +529,7 @@ export const recordAbsences = webMethod(Permissions.SiteMember, async (picks) =>
    own request goes — it was the approved one, and left behind it would sit in
    the admin's list as a fresh offer from somebody who has just said no. Other
    people's requests stay, so an admin can assign one of them straight away.
-   SportsNow should show the planned coach again until somebody new is on it. */
+   SportsNow is left as it is until somebody new is on it (`pauseSportsNow`). */
 async function releaseCover(staff, sessions) {
   if (!sessions.length) return 0;
   /* Copies, never the query's own items: assigning to those is what broke the
@@ -539,7 +539,7 @@ async function releaseCover(staff, sessions) {
   const mine = await findIn('CoverRequests', 'title',
     open.map(s => `${s._id}|${staff._id}`), 100);
   await Promise.all(mine.items.map(r => wixData.remove('CoverRequests', r._id, OPT)));
-  for (const s of open) await syncSportsNow(s, s.ownerId);
+  for (const s of open) await pauseSportsNow(s);
   return open.length;
 }
 
@@ -950,6 +950,24 @@ async function syncSportsNow(session, targetId) {
   await wixData.update('SportsNowTasks', t, OPT);
 }
 
+/* A class is back on the board with nobody on it yet: a coverer gave it back,
+   or an admin took the cover off. That is a step on the way, not who teaches
+   it, so it asks nothing of SportsNow — the keeper only ever sees the end of
+   the chain ("Valérie → Alessandra" was a to-do for a coach who was still
+   away). Whatever SportsNow shows stays until somebody new is assigned, and
+   that assignment then reads straight from it to the new coach. An open to-do
+   nobody has acted on yet is simply closed. */
+async function pauseSportsNow(session) {
+  if (!session || session.kind !== 'class') return;
+  if (isTestSession(session)) return;
+  const key = `class:${session.refId}:${session.date}`;
+  const found = await wixData.query('SportsNowTasks').eq('title', key).limit(1).find(OPT);
+  const t = found.items[0];
+  if (!t) return;
+  const upd = { ...t, targetId: t.snId, status: 'done' };
+  await wixData.update('SportsNowTasks', upd, OPT);
+}
+
 export const markSportsNowDone = webMethod(Permissions.SiteMember, async (taskId) => {
   const staff = await requireStaff();
   if (!isSnKeeper(staff)) throw new Error('NOT_ADMIN');
@@ -1121,9 +1139,8 @@ export const unassignCover = webMethod(Permissions.SiteMember, async (sessionId)
   s.status = 'open';
   s.coveredById = null;
   await wixData.update('Sessions', s, OPT);
-  /* Open again, nobody on it yet: SportsNow should show the planned coach
-     until a new cover is assigned. */
-  await syncSportsNow(s, s.ownerId);
+  /* Open again, nobody on it yet: a step on the way, not news for SportsNow. */
+  await pauseSportsNow(s);
   const reqs = await wixData.query('CoverRequests')
     .eq('sessionId', sessionId).limit(100).find(OPT);
   await Promise.all(reqs.items

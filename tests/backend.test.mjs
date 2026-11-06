@@ -172,7 +172,7 @@ for (const kind of ['class', 'shift']) {
   ok(kind + ': admin sees it uncovered', q.counts.uncovered === 1, q.counts);
   if (kind === 'class') {
     const t = db.SportsNowTasks.find(x => x.title === 'class:c1:' + D1);
-    ok('class: SportsNow to-do points back at the owner', t && t.targetId === 'anna' && t.status === 'done', t);
+    ok('class: giving it back leaves no SportsNow to-do', !t || t.status === 'done', t);
   }
 }
 
@@ -648,6 +648,36 @@ await T.cancelHandover(snSess._id);
 aq = await T.getAdminQueue(YM);
 ok('cancelling after SportsNow was changed asks to change it back',
   aq.sportsnow.length === 1 && aq.sportsnow[0].toName === 'Anna Meier', aq.sportsnow);
+
+/* Chris's 15 Dec case: Bea covers, SportsNow is changed to her, she gives it
+   back, Dan takes it. The keeper sees Anna → Bea, then Bea → Dan — never the
+   step in between that would put Anna (who is still away) back in. */
+world(); as('anna');
+db.Staff.find(p => p._id === 'dan').disciplines = 'group,more';
+await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D1 }]);
+snSess = db.Sessions[0];
+as('bea'); await T.requestCover(snSess._id, 'want');
+as('dan'); await T.requestCover(snSess._id, 'want');
+as('cara'); await T.assignCover(db.CoverRequests.find(r => r.staffId === 'bea')._id);
+aq = await T.getAdminQueue(YM);
+await T.markSportsNowDone(aq.sportsnow[0].taskId);
+as('bea'); await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D1 }]);
+as('cara'); aq = await T.getAdminQueue(YM);
+ok('a coverer giving it back adds no SportsNow to-do', aq.sportsnow.length === 0, aq.sportsnow);
+await T.assignCover(db.CoverRequests.find(r => r.staffId === 'dan')._id);
+aq = await T.getAdminQueue(YM);
+ok('...the next assignment goes straight from the old coverer to the new one',
+  aq.sportsnow.length === 1 && aq.sportsnow[0].fromName === 'Bea Lang'
+  && aq.sportsnow[0].toName === (db.Staff.find(p => p._id === 'dan').title), aq.sportsnow);
+await T.markSportsNowDone(aq.sportsnow[0].taskId);
+await T.unassignCover(snSess._id);
+aq = await T.getAdminQueue(YM);
+ok('an admin taking the cover off adds none either', aq.sportsnow.length === 0, aq.sportsnow);
+await T.cancelHandover(snSess._id);
+aq = await T.getAdminQueue(YM);
+ok('...but cancelling the handover still asks for the owner back',
+  aq.sportsnow.length === 1 && aq.sportsnow[0].toName === 'Anna Meier', aq.sportsnow);
+
 db.Staff.find(p => p._id === 'cara').roles = 'admin';
 aq = await T.getAdminQueue(YM);
 ok('an admin without the sportsnow role does not get the list', aq.sportsnow === null, aq.sportsnow);
