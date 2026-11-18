@@ -29,6 +29,14 @@ function weekdayOf(ds) {                      // 1 = Monday ... 7 = Sunday
   const w = new Date(Date.UTC(Y, M - 1, D)).getUTCDay();
   return w === 0 ? 7 : w;
 }
+/* A shift can be new: `Shifts.validFrom` ("YYYY-MM-DD") is its first day. Before
+   that it is not on the plan at all — no row, no "kein Frontdesk", no hours —
+   so adding a shift for next year leaves the months already worked alone.
+   Empty means it has always run. */
+function notYet(row, date) {
+  const from = String((row && row.validFrom) || '').trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(from) && date < from;
+}
 /* "Now" is the one thing that needs a real timezone. Between midnight and
    02:00 in Zurich, UTC is still yesterday — so yesterday's classes would look
    selectable, the open board would still offer them, and the schedule would
@@ -391,7 +399,7 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
              plannedHours: billed(mins), editableHours: false }, sess);
     });
 
-    shifts.filter(s => Number(s.weekday) === wd).forEach(s => {
+    shifts.filter(s => Number(s.weekday) === wd && !notYet(s, date)).forEach(s => {
       const key = `${s._id}|${date}`;
       const owner = assignAt[key];
       const sess = sessionAt[`shift:${s._id}:${date}`];
@@ -509,7 +517,7 @@ export const recordAbsences = webMethod(Permissions.SiteMember, async (picks) =>
       if (!l) { refused.notRunning++; return; }          // not running that day
       owner = idOfStaffNameIn(plan.staff, l.coach) || plan.idOfEmail[mail(row.coachEmail)];
     } else {
-      if (Number(row.weekday) !== weekdayOf(w.date)) { refused.notRunning++; return; }
+      if (Number(row.weekday) !== weekdayOf(w.date) || notYet(row, w.date)) { refused.notRunning++; return; }
       owner = assignAt[`${w.refId}|${w.date}`];
     }
     if (!owner || owner !== asId) { refused.notYours++; return; }
@@ -884,7 +892,7 @@ export const requestCover = webMethod(Permissions.SiteMember, async (sessionId, 
   const row = s.kind === 'class'
     ? await wixData.get('Classes', s.refId, OPT)
     : await wixData.get('Shifts', s.refId, OPT);
-  if (!row || isOff(row.active) || Number(row.weekday) !== weekdayOf(s.date)) {
+  if (!row || isOff(row.active) || Number(row.weekday) !== weekdayOf(s.date) || notYet(row, s.date)) {
     throw new Error('NOT_FOUND');
   }
   if (!canCover(staff, s.kind, describe(s.kind, row, s.date).discipline)) {
@@ -1223,7 +1231,7 @@ export const getFrontDesk = webMethod(Permissions.SiteMember, async (ym) => {
   const rows = [], totals = {};
   monthDates(ym).forEach(date => {
     const wd = weekdayOf(date);
-    plan.shifts.filter(s => Number(s.weekday) === wd).forEach(s => {
+    plan.shifts.filter(s => Number(s.weekday) === wd && !notYet(s, date)).forEach(s => {
       const key = `${s._id}|${date}`;
       const planned = Number(s.hours) || 0;
       const worked = overrideAt[key] === undefined ? planned : overrideAt[key];
@@ -1305,7 +1313,7 @@ export const setShiftStaff = webMethod(Permissions.SiteMember, async (shiftId, d
   if (typeof shiftId !== 'string' || !isDate(date)) throw new Error('BAD_INPUT');
 
   const shift = await wixData.get('Shifts', shiftId, OPT);
-  if (!shift || Number(shift.weekday) !== weekdayOf(date)) throw new Error('BAD_INPUT');
+  if (!shift || Number(shift.weekday) !== weekdayOf(date) || notYet(shift, date)) throw new Error('BAD_INPUT');
 
   let email = '';
   if (staffId) {
@@ -1408,7 +1416,7 @@ export const setShiftClosed = webMethod(Permissions.SiteMember, async (shiftId, 
   const me = requireFdAdmin(await requireStaff());
   if (typeof shiftId !== 'string' || !isDate(date)) throw new Error('BAD_INPUT');
   const shift = await wixData.get('Shifts', shiftId, OPT);
-  if (!shift || Number(shift.weekday) !== weekdayOf(date)) throw new Error('BAD_INPUT');
+  if (!shift || Number(shift.weekday) !== weekdayOf(date) || notYet(shift, date)) throw new Error('BAD_INPUT');
 
   const title = `shift:${shiftId}:${date}`;
   const found = await wixData.query('Sessions').eq('title', title).limit(1).find(OPT);
@@ -1496,6 +1504,9 @@ export const importShiftPlan = webMethod(Permissions.SiteMember, async (text, ap
     if (!shift) { errors.push(`${at}: no known shift code`); return; }
     if (Number(shift.weekday) !== weekdayOf(date)) {
       errors.push(`${at}: ${shift.title} is not on that weekday`); return;
+    }
+    if (notYet(shift, date)) {
+      errors.push(`${at}: ${shift.title} only starts on ${shift.validFrom}`); return;
     }
     if (date < today) { past++; return; }
 
@@ -1625,7 +1636,7 @@ export const getWeek = webMethod(Permissions.SiteMember, async (monday) => {
                  who: p ? nameOfRow(p) : 'no coach', colour: p ? colourOf(p) : null };
       });
 
-    const shifts = plan.shifts.filter(s => Number(s.weekday) === wd)
+    const shifts = plan.shifts.filter(s => Number(s.weekday) === wd && !notYet(s, date))
       .sort((a, b) => String(a.start).localeCompare(String(b.start)))
       .map(s => {
         const sess = sessionAt[`shift:${s._id}:${date}`];

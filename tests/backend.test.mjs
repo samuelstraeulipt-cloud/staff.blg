@@ -1268,6 +1268,25 @@ as('dan');  tb = await T.getOpenBoard();
 ok('already covered: a coach sees only the class', tb.covered.length === 1 && !/Front desk/.test(tb.covered[0].name), tb.covered);
 as('cara'); tb = await T.getOpenBoard();
 ok('already covered: an admin sees both', tb.covered.length === 2, tb.covered);
+
+console.log('\n— a shift can have a first day (Shifts.validFrom) —');
+world();
+db.Shifts[0].validFrom = D2;                          // the Tuesday shift only starts on D2
+as('cara');
+const vf = await T.getFrontDesk(YM);
+ok('no row before its first day', !vf.rows.some(r => r.shiftId === 's1' && r.date === D1), vf.rows);
+ok('...a row from its first day on', vf.rows.some(r => r.shiftId === 's1' && r.date === D2), vf.rows);
+await threw('cannot be staffed before it starts', () => T.setShiftStaff('s1', D1, 'bea'), 'BAD_INPUT');
+await threw('...nor closed', () => T.setShiftClosed('s1', D1, true), 'BAD_INPUT');
+const vfi = await T.importShiftPlan('02.03.2027\tDi\tFD-TUE\t16:00:00\t20:00:00\tBea\t', false);
+ok('import says it only starts on its first day',
+  vfi.errors.some(e => /only starts on 2027-03-09/.test(e)), vfi.errors);
+as('anna');
+const vfm = await T.getMyMonth(YM);
+ok('not on My month before it starts', !vfm.items.some(i => i.kind === 'shift' && i.date === D1), vfm.items);
+db.Shifts[0].validFrom = '';
+as('cara');
+ok('empty validFrom = always', (await T.getFrontDesk(YM)).rows.some(r => r.shiftId === 's1' && r.date === D1));
 }
 
 console.log('\n' + (fail ? 'FAILED ' + fail : 'all green') + '  (' + pass + ' passed)');
