@@ -777,6 +777,16 @@ function canCover(staff, kind, discipline) {
   return !d || list(staff.disciplines).includes(d);
 }
 
+/* Which side of Open classes a person is shown at all. Coaches see classes,
+   the front desk sees shifts, admins see both — so nobody scrolls past
+   sessions they could never take, covered or not. */
+function seesKind(staff, kind) {
+  if (isAdmin(staff)) return true;
+  const roles = list(staff.roles);
+  if (kind === 'shift') return roles.includes('frontdesk') || roles.includes('fdlead');
+  return roles.includes('coach');
+}
+
 /* A front desk shift that was handed over and never covered, on a day that has
    now passed, is not an open question any more — nobody was on the desk, and
    that is the answer. It reads as "kein Frontdesk" wherever it appears, with
@@ -830,6 +840,7 @@ export const getOpenBoard = webMethod(Permissions.SiteMember, async () => {
     const d = describe(s.kind, row, s.date);
 
     if (s.status === 'closed') return;        // settled: nobody is on it, on purpose
+    if (!seesKind(staff, s.kind)) return;     // the other side of the house
     if (s.status === 'covered') {
       covered.push({ date: s.date, time: d.time, name: d.name,
         coveredByName: nameOfRow(plan.byId[s.coveredById]),
@@ -837,12 +848,15 @@ export const getOpenBoard = webMethod(Permissions.SiteMember, async () => {
       return;
     }
     if (s.ownerId === staff._id) return;                // your own is on My month
-    if (!canCover(staff, s.kind, d.discipline)) return; // not cleared — never sent
+    /* Not cleared — never sent, except to an admin, who sees it to know it
+       is open but takes it from Admin, not from here. */
+    const canTake = canCover(staff, s.kind, d.discipline);
+    if (!canTake && !isAdmin(staff)) return;
 
     const reqs = (reqBySession[s._id] || []).filter(r => r.status !== 'declined');
     const own = reqs.find(r => r.staffId === staff._id);
     mine.push({ sessionId: s._id, kind: s.kind, refId: s.refId, date: s.date,
-      test: isTestSession(s),
+      test: isTestSession(s), canTake,
       time: d.time, name: d.name, discipline: d.discipline, hours: d.hours,
       ownerName: nameOfRow(plan.byId[s.ownerId]),
       ownerColour: colourOf(plan.byId[s.ownerId]),

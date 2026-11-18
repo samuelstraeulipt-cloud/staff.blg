@@ -119,6 +119,17 @@
   var isAdmin = function (me) { return has(me.roles, 'admin'); };
   var isCoach = function (me) { return has(me.roles, 'coach'); };
   var isFD    = function (me) { return has(me.roles, 'frontdesk'); };
+  var isFdLead = function (me) { return has(me.roles, 'fdlead'); };
+
+  /* Open classes is split by trade: coaches see classes, the front desk sees
+     shifts, admins see both. The tab says which one it holds. */
+  var seesClasses = function (me) { return isAdmin(me) || isCoach(me); };
+  var seesShifts  = function (me) { return isAdmin(me) || isFD(me) || isFdLead(me); };
+  function openLabel(me) {
+    if (seesClasses(me) && seesShifts(me)) return 'Open classes & shifts';
+    return seesShifts(me) ? 'Open shifts' : 'Open classes';
+  }
+  function navLabel(n, me) { return n.key === 'open' ? openLabel(me) : n.label; }
 
   function roleLabel(me) {
     var r = [];
@@ -135,7 +146,7 @@
     { key: 'month',     label: 'My month',      built: true,
       show: function (me) { return isCoach(me) || isFD(me); } },
     { key: 'open',      label: 'Open classes',  built: true,
-      show: function (me) { return isCoach(me) || isFD(me); } },
+      show: function (me) { return seesClasses(me) || seesShifts(me); } },
     /* The built schedule is hidden, not deleted: SportsNow is the more
        accurate plan and now carries the Schedule name. Flip this back to
        true if the built one is ever needed again. */
@@ -797,7 +808,7 @@
         ? ' data-go="' + n.key + '"'
         : ' aria-disabled="true" title="Not built yet"';
       return '<button type="button" class="' + cls + '"' + attrs + '>' +
-        esc(n.label) + '</button>';
+        esc(navLabel(n, me)) + '</button>';
     }).join('');
 
     return '<header class="topbar"><div class="topbar-in">' +
@@ -862,7 +873,7 @@
       if (moreOpen) {
         out.push('<div class="moremenu">' + rest.map(function (n) {
           return '<button type="button" data-go="' + n.key + '"' +
-            (n.key === active ? ' class="on"' : '') + '>' + esc(n.label) + '</button>';
+            (n.key === active ? ' class="on"' : '') + '>' + esc(navLabel(n, me)) + '</button>';
         }).join('') + '</div>');
       }
     }
@@ -2194,17 +2205,19 @@
     _open(d, message, state) {
       var mine = d.mine || [], covered = d.covered || [];
       var out = [this._flash(message, state), '<div class="page">'];
+      var take = mine.filter(function (s) { return s.canTake !== false; });
+      var others = mine.filter(function (s) { return s.canTake === false; });
 
-      out.push(this._head('Open classes',
+      out.push(this._head(openLabel(d.me || {}),
         'Sessions with nobody on them. Request one and an admin confirms it.'));
 
       out.push('<div class="card" style="margin-bottom:16px">' +
         '<div class="card-head"><h2 class="card-title">You can cover these</h2>' +
-        '<span class="pill ' + (mine.length ? 'pill-bad' : 'pill-ok') + '">' +
-        mine.length + ' open</span></div>');
+        '<span class="pill ' + (take.length ? 'pill-bad' : 'pill-ok') + '">' +
+        take.length + ' open</span></div>');
 
-      if (mine.length) {
-        mine.forEach(function (s) {
+      if (take.length) {
+        take.forEach(function (s) {
           var n = Number(s.requests || 0);
           out.push('<div class="row">' +
             '<div class="dotcol" style="background:' + esc(s.ownerColour || '#B9B9C6') + '"></div>' +
@@ -2232,6 +2245,27 @@
         out.push('<div class="empty">Nothing open that you’re cleared for right now.</div>');
       }
       out.push('</div>');
+
+      /* Admins only: what is open that they would not take themselves. Read
+         only — cover for these is assigned from Admin. */
+      if (others.length) {
+        out.push('<div class="card" style="margin-bottom:16px"><div class="card-head">' +
+          '<h2 class="card-title">Open for others</h2>' +
+          '<span class="pill pill-bad">' + others.length + ' open</span></div>');
+        others.forEach(function (s) {
+          var n = Number(s.requests || 0);
+          out.push('<div class="row">' +
+            '<div class="dotcol" style="background:' + esc(s.ownerColour || '#B9B9C6') + '"></div>' +
+            '<div class="row-main"><div class="row-t">' + esc(s.name) + testTag(s) + '</div>' +
+            '<div class="row-s">' + esc(fmtShort(s.date)) + ' · ' + esc(s.time) +
+              ' · normally ' + esc(shortName(s.ownerName)) +
+              (s.discipline === 'frontdesk' ? ' · ' + hrs(s.hours) + ' h' : '') +
+              ' · ' + (n ? n + (n === 1 ? ' request' : ' requests') : 'no requests yet') +
+            '</div></div>' + discPill(s.discipline) + '</div>');
+        });
+        out.push('<div class="note-line">Assign cover for these from <strong>Admin</strong>.</div>');
+        out.push('</div>');
+      }
 
       if (covered.length) {
         out.push('<div class="card"><div class="card-head">' +

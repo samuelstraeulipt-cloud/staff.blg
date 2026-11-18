@@ -1240,6 +1240,34 @@ ok('the coach can hand over the new date', (await T.recordAbsences([{ kind: 'cla
 as('bea');
 let rc = 'ok'; try { await T.requestCover(db.Sessions[0]._id, 'want'); } catch (e) { rc = e.message; }
 ok('...and a colleague can ask to cover it before Monday\'s check', rc === 'ok', rc);
+
+console.log('\n— Open classes is split by trade —');
+world();
+db.Staff.push({ _id: 'fia', title: 'Fia Graf', email: 'fia@blg.ch', roles: 'frontdesk', disciplines: '', colour: '#123456' });
+as('anna');
+await T.recordAbsences([{ kind: 'class', refId: 'c1', date: D1 }, { kind: 'shift', refId: 's1', date: D1 }]);
+{ const d = new Date(); do { d.setUTCDate(d.getUTCDate() + 1); } while (d.getUTCDay() !== 2);
+  const near = d.toISOString().slice(0, 10); db.Sessions.forEach(x => { x.date = near; }); }  // inside the 90-day board
+const kinds = b => b.mine.map(x => x.kind).sort().join(',');
+as('fia');  let tb = await T.getOpenBoard();
+ok('front desk only sees the shift, not the class', kinds(tb) === 'shift', tb.mine);
+as('dan');  tb = await T.getOpenBoard();
+ok('a coach (not cleared for group) sees neither', kinds(tb) === '', tb.mine);
+as('bea');  tb = await T.getOpenBoard();
+ok('coach + front desk sees both', kinds(tb) === 'class,shift', tb.mine);
+ok('...and can take both', tb.mine.every(x => x.canTake === true), tb.mine);
+as('cara'); tb = await T.getOpenBoard();
+ok('an admin sees both', kinds(tb) === 'class,shift', tb.mine);
+ok('...read-only where she is not cleared', tb.mine.every(x => x.canTake === false), tb.mine);
+let ar = 'ok'; try { await T.requestCover(tb.mine[0].sessionId, 'want'); } catch (e) { ar = e.message; }
+ok('...and still cannot request them', ar !== 'ok', ar);
+db.Sessions.forEach(x => { x.status = 'covered'; x.coveredById = 'bea'; });
+as('fia');  tb = await T.getOpenBoard();
+ok('already covered: front desk sees only the shift', tb.covered.length === 1 && /Front desk/.test(tb.covered[0].name), tb.covered);
+as('dan');  tb = await T.getOpenBoard();
+ok('already covered: a coach sees only the class', tb.covered.length === 1 && !/Front desk/.test(tb.covered[0].name), tb.covered);
+as('cara'); tb = await T.getOpenBoard();
+ok('already covered: an admin sees both', tb.covered.length === 2, tb.covered);
 }
 
 console.log('\n' + (fail ? 'FAILED ' + fail : 'all green') + '  (' + pass + ' passed)');
