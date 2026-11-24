@@ -9,6 +9,7 @@ import { Permissions, webMethod } from 'wix-web-module';
 import { currentMember, authentication, members } from 'wix-members-backend';
 import { elevate } from 'wix-auth';
 import wixData from 'wix-data';
+import { randomFillSync } from 'crypto';
 import { snWeek, sameName, mondayOf, addDays, checkSportsNow,
          classIndex, weeksOfMonth } from 'backend/sportsnow.js';
 
@@ -454,14 +455,12 @@ async function monthFor(staff, ym) {
    subscribed to an old link empties out instead of keeping stale entries. */
 const SITE = 'https://www.blgsports.ch';
 const calTokenOk = t => /^[A-Za-z0-9]{24,64}$/.test(String(t || ''));
-/* Web Crypto where the runtime has it as a global; Node's own module where it
-   does not. Never Math.random — the token is the only key to the calendar. */
+/* Node's own crypto, never Math.random — the token is the only key to the
+   calendar. */
 async function newCalToken() {
   const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
   const bytes = new Uint8Array(32);
-  const c = globalThis.crypto;
-  if (c && c.getRandomValues) c.getRandomValues(bytes);
-  else (await import('crypto')).randomFillSync(bytes);
+  randomFillSync(bytes);
   let t = '';
   bytes.forEach(b => { t += abc[b % abc.length]; });
   return t;
