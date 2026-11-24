@@ -236,7 +236,7 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
   /* The person's calendar link is made the first time they open their month,
      so the "Add to calendar" button always has one to offer. */
   if (!calTokenOk(staff.calToken)) {
-    staff = { ...staff, calToken: newCalToken() };
+    staff = { ...staff, calToken: await newCalToken() };
     await wixData.update('Staff', staff, OPT);
   }
   const out = await monthFor(staff, ym);
@@ -454,12 +454,14 @@ async function monthFor(staff, ym) {
    subscribed to an old link empties out instead of keeping stale entries. */
 const SITE = 'https://www.blgsports.ch';
 const calTokenOk = t => /^[A-Za-z0-9]{24,64}$/.test(String(t || ''));
-function newCalToken() {
+/* Web Crypto where the runtime has it as a global; Node's own module where it
+   does not. Never Math.random — the token is the only key to the calendar. */
+async function newCalToken() {
   const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
   const bytes = new Uint8Array(32);
   const c = globalThis.crypto;
   if (c && c.getRandomValues) c.getRandomValues(bytes);
-  else throw new Error('NO_RANDOM');
+  else (await import('crypto')).randomFillSync(bytes);
   let t = '';
   bytes.forEach(b => { t += abc[b % abc.length]; });
   return t;
