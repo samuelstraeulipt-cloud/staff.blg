@@ -535,7 +535,7 @@ function calEvents(items) {
         const q = String(i.time || '').split(/[–-]/);
         from = q[0]; to = q[1];
         title = 'Front desk';
-      } else if (i.room) where = `BLG Sports — ${i.room}`;
+      } else if (i.room) where = i.room;           // SportsNow's own room + address
       if (!to) to = addMin(from, Math.round((Number(i.plannedHours) || 1) * 60));
       if (i.state === 'covering') title += ` (for ${String(i.note || '').split(' ')[0]})`;
       return { uid: `${i.kind}-${i.refId || 'x'}-${i.date}-${String(from).replace(':', '')}@teamhub.blgsports.ch`,
