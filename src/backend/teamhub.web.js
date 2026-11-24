@@ -448,7 +448,7 @@ async function monthFor(staff, ym) {
 /* -------------------------------------------------------------- calendar
    Each person has a secret `Staff.calToken`. Their calendar app fetches
    /_functions/teamhubCal/<token>.ics (backend/http-functions.js) and gets
-   their own classes and shifts, this month and the next two. Calendar apps
+   their own classes and shifts, this month and the next eleven. Calendar apps
    cannot sign in, so the token is the only key: long, random, and thrown away
    by "Stop calendar sync". An unknown or stopped token is answered with an
    empty calendar rather than an error, so a calendar that is still
@@ -465,6 +465,9 @@ async function newCalToken() {
   bytes.forEach(b => { t += abc[b % abc.length]; });
   return t;
 }
+/* How far ahead the calendar reaches: this month and the next eleven, so
+   people can plan holidays around it. */
+const CAL_MONTHS = 12;
 const calUrlFor = token => `${SITE}/_functions/teamhubCal/${token}.ics`;
 
 /* "Stop calendar sync": the old link stops answering with anything but an
@@ -554,11 +557,18 @@ export const calendarFeed = webMethod(Permissions.Anyone, async (token) => {
   if (!staff || isOff(staff.active)) return icsCalendar([]);
   const ym0 = todayISO().slice(0, 7);
   const [Y, M] = ym0.split('-').map(Number);
-  const yms = [0, 1, 2].map(k => {
+  const yms = [];
+  for (let k = 0; k < CAL_MONTHS; k++) {
     const d = new Date(Date.UTC(Y, M - 1 + k, 1));
-    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}`;
-  });
-  const months = await Promise.all(yms.map(ym => monthFor(staff, ym)));
+    yms.push(`${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}`);
+  }
+  /* A year is ~52 SportsNow weeks: three months at a time, so the feed is not
+     asked for all of them at once. Weeks shared by two months come from
+     snWeek's cache the second time. */
+  const months = [];
+  for (let i = 0; i < yms.length; i += 3) {
+    months.push(...await Promise.all(yms.slice(i, i + 3).map(ym => monthFor(staff, ym))));
+  }
   return icsCalendar(calEvents([].concat(...months.map(m => m.items))));
 });
 

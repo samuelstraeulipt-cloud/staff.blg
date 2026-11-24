@@ -1331,6 +1331,16 @@ ok('stopping clears the token', !(db.Staff.find(x => x._id === 'bea') || {}).cal
 ok('...so the old link answers empty', !(await T.calendarFeed(btok)).includes('BEGIN:VEVENT'));
 const fresh = (await T.getMyMonth(NYM)).calUrl;
 ok('...and My month makes a new link', fresh && !fresh.includes(btok), fresh);
+{ /* A shift and a class eight months out are both in the calendar. */
+  const far = new Date(NT + 'T12:00:00Z'); far.setUTCDate(far.getUTCDate() + 7 * 35);
+  const FT = far.toISOString().slice(0, 10);
+  setFeed([SN(1, NT, '18:00', 'Group Strength', 'Anna Meier'), SN(2, FT, '18:00', 'Group Strength', 'Anna Meier')]);
+  db.ShiftAssignments.push({ title: 's1|' + FT, date: FT, shiftId: 's1', staffEmail: 'anna@blg.ch' });
+  const fics = await T.calendarFeed(tok);
+  const fd = FT.replace(/-/g, '');
+  ok('the calendar reaches eight months ahead: class and shift',
+    fics.includes(`DTSTART;TZID=Europe/Zurich:${fd}T180000`) && fics.includes(`DTSTART;TZID=Europe/Zurich:${fd}T160000`), FT);
+}
 db.Staff.find(x => x._id === 'anna').active = false;
 ok('someone made inactive gets an empty calendar', !(await T.calendarFeed(tok)).includes('BEGIN:VEVENT'));
 }
