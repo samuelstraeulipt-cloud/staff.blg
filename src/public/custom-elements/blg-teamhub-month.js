@@ -117,11 +117,6 @@
 
   /* The subscribe links for one feed URL. webcal:// tells a phone or Mac
      "subscribe to this", not "download this". */
-  /* A phone or tablet, where Google's add-by-URL page does not exist. */
-  function isPhone() {
-    return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || '') ||
-      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  }
   function calLinks(url) {
     var web = String(url).replace(/^https?:/, 'webcal:');
     return {
@@ -1296,7 +1291,7 @@
       var el = ev.target && ev.target.closest
         ? ev.target.closest('[data-ym],[data-thismonth],[data-week],[data-thisweek],' +
             '[data-pick],[data-clear],[data-record],[data-undo],[data-msg],' +
-            '[data-closeshare],[data-closetell],[data-cal],[data-closecal],[data-calgoogle],[data-calback],[data-calstop],[data-calstopyes],[data-copy],[data-copytable],[data-go],[data-req],' +
+            '[data-closeshare],[data-closetell],[data-cal],[data-closecal],[data-calback],[data-calstop],[data-calstopyes],[data-copy],[data-copytable],[data-go],[data-req],' +
             '[data-withdraw],[data-assign],[data-decline],[data-unassign],' +
             '[data-askcancel],[data-nocancel],[data-cancel],[data-authmode],[data-signout],[data-sndone],' +
             '[data-plancheck],[data-planapply],[data-planclear],[data-sncheck],' +
@@ -1412,7 +1407,6 @@
       if (el.dataset.closetell) { this._closeTell(); return; }
       if (el.dataset.cal) { this._cal = true; this._calAnim = true; this._syncCal(); return; }
       if (el.dataset.closecal) { this._closeCal(); return; }
-      if (el.dataset.calgoogle) { this._calStep = 'google'; this._syncCal(); return; }
       if (el.dataset.calback) { this._calStep = null; this._syncCal(); return; }
       if (el.dataset.calstop) { this._calStep = 'stop'; this._syncCal(); return; }
       if (el.dataset.calstopyes) { this._closeCal(); this._emit('teamhub:calstop', {}); return; }
@@ -1767,25 +1761,7 @@
         return '<a class="calopt" href="' + esc(href) + '"' + (attrs || '') + '>' + inner(icon, name) + '</a>';
       };
       if (this._calAnim) dlg.classList.add('wa-in');
-      /* Google lets nobody subscribe from its phone app or phone site: it has
-         to be done once in a computer's browser, and then shows on the phone
-         as well. So on a phone the Google choice explains that and offers to
-         mail the link to yourself instead of opening a page that can't do it. */
-      if (this._calStep === 'google') {
-        dlg.innerHTML = '<div class="wa-box" role="document">' +
-          '<h2 class="wa-title" id="calTitle">Google Calendar: once on a computer</h2>' +
-          '<p class="wa-sub">Google only lets you add a calendar in a computer’s browser, not in ' +
-            'its phone app. Do it once on a computer and it shows up in the Google Calendar app ' +
-            'on your phone too.</p>' +
-          '<p class="wa-sub">Send yourself the link, open the mail on your computer and click it — ' +
-            'or open TeamHub on your computer and choose Google Calendar there.</p>' +
-          '<div class="wa-actions">' +
-            '<a class="btn btn-primary" href="mailto:?subject=' + encodeURIComponent('BLG TeamHub calendar') +
-              '&body=' + encodeURIComponent('Open this on your computer to add your TeamHub calendar to Google Calendar:\n\n' + L.google) +
-              '">Email me the link</a>' +
-            '<button class="btn btn-quiet" data-calback="1">Back</button>' +
-          '</div></div>';
-      } else if (this._calStep === 'stop') {
+      if (this._calStep === 'stop') {
         dlg.innerHTML = '<div class="wa-box" role="document">' +
           '<h2 class="wa-title" id="calTitle">Stop calendar sync?</h2>' +
           '<p class="wa-sub">Your BLG TeamHub calendar empties out and stops updating, in every ' +
@@ -1801,9 +1777,7 @@
           'calendar and keep themselves up to date.</p>' +
         '<div class="calopts">' +
           opt(L.apple, CAL_APPLE, 'Apple Calendar') +
-          (isPhone()
-            ? '<button type="button" class="calopt" data-calgoogle="1">' + inner(CAL_GOOGLE, 'Google Calendar') + '</button>'
-            : opt(L.google, CAL_GOOGLE, 'Google Calendar', ' target="_blank" rel="noopener"')) +
+          opt(L.google, CAL_GOOGLE, 'Google Calendar', ' target="_blank" rel="noopener"') +
           opt(L.outlook, CAL_OUTLOOK, 'Outlook', ' target="_blank" rel="noopener"') +
         '</div>' +
         '<div class="wa-actions">' +
