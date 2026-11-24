@@ -231,8 +231,21 @@ const classOwnerFor = (staff, rows) =>
 
 /* ------------------------------------------------------------------ month */
 export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
-  const staff = await requireStaff();
+  let staff = await requireStaff();
   if (!isYm(ym)) ym = todayISO().slice(0, 7);
+  /* The person's calendar link is made the first time they open their month,
+     so the "Add to calendar" button always has one to offer. */
+  if (!calTokenOk(staff.calToken)) {
+    staff = { ...staff, calToken: newCalToken() };
+    await wixData.update('Staff', staff, OPT);
+  }
+  const out = await monthFor(staff, ym);
+  return { ...out, calUrl: calUrlFor(staff.calToken) };
+});
+
+/* One person's month — what My month shows, and what their calendar feed is
+   built from, so the two can never disagree. */
+async function monthFor(staff, ym) {
   const today = todayISO();
 
   /* `active` is filtered in memory rather than with .ne(): whether a query
@@ -394,6 +407,7 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
          ninety minutes for a week should be paid as ninety. */
       const mins = snMinutes(l) || (c ? Number(c.minutes) : 0);
       push({ kind: 'class', refId: c ? c._id : '', date, time: l.time || '',
+             end: l.end || '', room: l.room || '',
              name: (c && c.title) || l.name || '',
              discipline: (c && c.discipline) || '', hours: billed(mins),
              plannedHours: billed(mins), editableHours: false }, sess);
@@ -428,6 +442,123 @@ export const getMyMonth = webMethod(Permissions.SiteMember, async (ym) => {
 
   return { me: pub(staff), ym, today, items, doubtfulWeeks: doubtfulWeeks.sort(),
     totals: { hours: Math.round(totalHours * 100) / 100 } };
+}
+
+/* -------------------------------------------------------------- calendar
+   Each person has a secret `Staff.calToken`. Their calendar app fetches
+   /_functions/teamhubCal/<token>.ics (backend/http-functions.js) and gets
+   their own classes and shifts, this month and the next two. Calendar apps
+   cannot sign in, so the token is the only key: long, random, and thrown away
+   by "Stop calendar sync". An unknown or stopped token is answered with an
+   empty calendar rather than an error, so a calendar that is still
+   subscribed to an old link empties out instead of keeping stale entries. */
+const SITE = 'https://www.blgsports.ch';
+const calTokenOk = t => /^[A-Za-z0-9]{24,64}$/.test(String(t || ''));
+function newCalToken() {
+  const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const bytes = new Uint8Array(32);
+  const c = globalThis.crypto;
+  if (c && c.getRandomValues) c.getRandomValues(bytes);
+  else throw new Error('NO_RANDOM');
+  let t = '';
+  bytes.forEach(b => { t += abc[b % abc.length]; });
+  return t;
+}
+const calUrlFor = token => `${SITE}/_functions/teamhubCal/${token}.ics`;
+
+/* "Stop calendar sync": the old link stops answering with anything but an
+   empty calendar. The next visit to My month makes a new one. */
+export const stopCalendar = webMethod(Permissions.SiteMember, async () => {
+  const staff = await requireStaff();
+  await wixData.update('Staff', { ...staff, calToken: '' }, OPT);
+  return { stopped: true };
+});
+
+const icsText = v => String(v == null ? '' : v)
+  .replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+/* RFC 5545 lines are at most 75 octets; longer ones continue after CRLF + space. */
+function icsFold(line) {
+  const out = []; let cur = '', n = 0;
+  for (const ch of line) {
+    const b = encodeURIComponent(ch).replace(/%[0-9A-F]{2}/g, 'x').length;
+    if (n + b > 74) { out.push(cur); cur = ' '; n = 1; }
+    cur += ch; n += b;
+  }
+  out.push(cur);
+  return out.join('\r\n');
+}
+const icsWhen = (date, hhmm) => {
+  const q = String(hhmm || '').trim().split(':');
+  return date.replace(/-/g, '') + 'T' + pad(Number(q[0]) || 0) + pad(Number(q[1]) || 0) + '00';
+};
+const ICS_ZURICH = [
+  'BEGIN:VTIMEZONE', 'TZID:Europe/Zurich',
+  'BEGIN:DAYLIGHT', 'TZOFFSETFROM:+0100', 'TZOFFSETTO:+0200', 'TZNAME:CEST',
+  'DTSTART:19700329T020000', 'RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU', 'END:DAYLIGHT',
+  'BEGIN:STANDARD', 'TZOFFSETFROM:+0200', 'TZOFFSETTO:+0100', 'TZNAME:CET',
+  'DTSTART:19701025T030000', 'RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU', 'END:STANDARD',
+  'END:VTIMEZONE'];
+
+function icsCalendar(events) {
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//BLG Sports//TeamHub//EN',
+    'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'X-WR-CALNAME:BLG TeamHub',
+    'X-WR-TIMEZONE:Europe/Zurich', 'REFRESH-INTERVAL;VALUE=DURATION:PT1H',
+    'X-PUBLISHED-TTL:PT1H', ...ICS_ZURICH];
+  events.forEach(e => {
+    lines.push('BEGIN:VEVENT', `UID:${e.uid}`, `DTSTAMP:${stamp}`,
+      `DTSTART;TZID=Europe/Zurich:${e.start}`, `DTEND;TZID=Europe/Zurich:${e.end}`,
+      `SUMMARY:${icsText(e.title)}`);
+    if (e.where) lines.push(`LOCATION:${icsText(e.where)}`);
+    if (e.note) lines.push(`DESCRIPTION:${icsText(e.note)}`);
+    lines.push('END:VEVENT');
+  });
+  lines.push('END:VCALENDAR');
+  return lines.map(icsFold).join('\r\n') + '\r\n';
+}
+
+/* What goes into the calendar: everything on the person's month that they
+   are actually doing. Handed over (waiting or covered) and "kein Frontdesk"
+   are left out — so a handover takes the entry out of their calendar and the
+   cover puts it into the coverer's. */
+function calEvents(items) {
+  const addMin = (hhmm, mins) => {
+    const q = String(hhmm || '').split(':');
+    const t = (Number(q[0]) || 0) * 60 + (Number(q[1]) || 0) + mins;
+    return pad(Math.floor(t / 60) % 24) + ':' + pad(t % 60);
+  };
+  return items.filter(i => i.state === 'planned' || i.state === 'done' || i.state === 'covering')
+    .map(i => {
+      let from = i.time, to = i.end, title = i.name, where = 'BLG Sports';
+      if (i.kind === 'shift') {
+        const q = String(i.time || '').split(/[–-]/);
+        from = q[0]; to = q[1];
+        title = 'Front desk';
+      } else if (i.room) where = `BLG Sports — ${i.room}`;
+      if (!to) to = addMin(from, Math.round((Number(i.plannedHours) || 1) * 60));
+      if (i.state === 'covering') title += ` (for ${String(i.note || '').split(' ')[0]})`;
+      return { uid: `${i.kind}-${i.refId || 'x'}-${i.date}-${String(from).replace(':', '')}@teamhub.blgsports.ch`,
+        start: icsWhen(i.date, from), end: icsWhen(i.date, to), title, where,
+        note: i.state === 'covering' ? `Covering for ${i.note}` : '' };
+    });
+}
+
+/* Called by backend/http-functions.js with the token from the URL. Anyone may
+   call it, which is the point: the calendar app has no login. Without a valid,
+   current token it returns an empty calendar and nothing else. */
+export const calendarFeed = webMethod(Permissions.Anyone, async (token) => {
+  if (!calTokenOk(token)) return icsCalendar([]);
+  const res = await wixData.query('Staff').eq('calToken', String(token)).find(OPT);
+  const staff = res.items.length === 1 ? res.items[0] : null;
+  if (!staff || isOff(staff.active)) return icsCalendar([]);
+  const ym0 = todayISO().slice(0, 7);
+  const [Y, M] = ym0.split('-').map(Number);
+  const yms = [0, 1, 2].map(k => {
+    const d = new Date(Date.UTC(Y, M - 1 + k, 1));
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}`;
+  });
+  const months = await Promise.all(yms.map(ym => monthFor(staff, ym)));
+  return icsCalendar(calEvents([].concat(...months.map(m => m.items))));
 });
 
 /* ---------------------------------------------------------------- absences */

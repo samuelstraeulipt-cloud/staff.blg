@@ -1287,6 +1287,52 @@ ok('not on My month before it starts', !vfm.items.some(i => i.kind === 'shift' &
 db.Shifts[0].validFrom = '';
 as('cara');
 ok('empty validFrom = always', (await T.getFrontDesk(YM)).rows.some(r => r.shiftId === 's1' && r.date === D1));
+
+console.log('\n— the calendar feed (Add to calendar) —');
+world();
+{ const d = new Date(); do { d.setUTCDate(d.getUTCDate() + 1); } while (d.getUTCDay() !== 2);
+  globalThis.__nearTue = d.toISOString().slice(0, 10); }
+const NT = globalThis.__nearTue, NYM = NT.slice(0, 7);
+setFeed([SN(1, NT, '18:00', 'Group Strength', 'Anna Meier')]);
+db.ShiftAssignments.push({ title: 's1|' + NT, date: NT, shiftId: 's1', staffEmail: 'anna@blg.ch' });
+as('anna');
+const cm = await T.getMyMonth(NYM);
+const tok = (db.Staff.find(x => x._id === 'anna') || {}).calToken;
+ok('My month carries a calendar link', /^https:\/\/www\.blgsports\.ch\/_functions\/teamhubCal\/[A-Za-z0-9]{32}\.ics$/.test(cm.calUrl || ''), cm.calUrl);
+ok('...with the token stored on the Staff row', tok && cm.calUrl.includes(tok), tok);
+ok('...and the same link next time', (await T.getMyMonth(NYM)).calUrl === cm.calUrl);
+let ics = await T.calendarFeed(tok);
+const nd = NT.replace(/-/g, '');
+ok('the feed is a calendar', /^BEGIN:VCALENDAR\r\n/.test(ics) && /END:VCALENDAR\r\n$/.test(ics) && /X-WR-CALNAME:BLG TeamHub/.test(ics));
+ok('...with her class, at its own times, in Zurich time',
+  ics.includes('SUMMARY:Group Strength') && ics.includes(`DTSTART;TZID=Europe/Zurich:${nd}T180000`) &&
+  ics.includes(`DTEND;TZID=Europe/Zurich:${nd}T185500`), ics);
+ok('...and her front desk shift', ics.includes('SUMMARY:Front desk') &&
+  ics.includes(`DTSTART;TZID=Europe/Zurich:${nd}T160000`) && ics.includes(`DTEND;TZID=Europe/Zurich:${nd}T200000`), ics);
+ok('...lines end CRLF and none is longer than 75 octets',
+  ics.split('\r\n').every(l => Buffer.byteLength(l) <= 75) && !/[^\r]\n/.test(ics));
+as('bea');
+ok('Bea\'s feed does not carry Anna\'s class', !(await T.calendarFeed(
+  (await T.getMyMonth(NYM)).calUrl.split('/').pop().replace('.ics', ''))).includes('Group Strength'));
+as('anna');
+await T.recordAbsences([{ kind: 'class', refId: 'c1', date: NT }]);
+ics = await T.calendarFeed(tok);
+ok('a handed-over class leaves her calendar', !ics.includes('SUMMARY:Group Strength') && ics.includes('SUMMARY:Front desk'), ics);
+const hs = db.Sessions.find(x => x.kind === 'class' && x.date === NT);
+hs.status = 'covered'; hs.coveredById = 'bea';
+as('bea');
+const btok = (db.Staff.find(x => x._id === 'bea') || {}).calToken;
+ics = await T.calendarFeed(btok);
+ok('...and lands in the coverer\'s, saying for whom', ics.includes('SUMMARY:Group Strength (for Anna)'), ics);
+ok('an unknown token gets an empty calendar, not an error',
+  !(await T.calendarFeed('x'.repeat(32))).includes('BEGIN:VEVENT') && !(await T.calendarFeed('../etc')).includes('BEGIN:VEVENT'));
+await T.stopCalendar();
+ok('stopping clears the token', !(db.Staff.find(x => x._id === 'bea') || {}).calToken);
+ok('...so the old link answers empty', !(await T.calendarFeed(btok)).includes('BEGIN:VEVENT'));
+const fresh = (await T.getMyMonth(NYM)).calUrl;
+ok('...and My month makes a new link', fresh && !fresh.includes(btok), fresh);
+db.Staff.find(x => x._id === 'anna').active = false;
+ok('someone made inactive gets an empty calendar', !(await T.calendarFeed(tok)).includes('BEGIN:VEVENT'));
 }
 
 console.log('\n' + (fail ? 'FAILED ' + fail : 'all green') + '  (' + pass + ' passed)');

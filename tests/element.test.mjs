@@ -1106,6 +1106,41 @@ console.log('\n— an admin is handed the note for the person they assigned —'
   ok('...but not for "kein Frontdesk"', !(await tell()));
 }
 
+console.log('\n— Add to calendar —');
+{
+  const R = 'document.querySelector("blg-teamhub-month").shadowRoot';
+  const q = sel => page.evaluate(`!!${R}.querySelector(${JSON.stringify(sel)})`);
+  const click = sel => page.evaluate(`${R}.querySelector(${JSON.stringify(sel)}).click()`);
+  const URL1 = 'https://www.blgsports.ch/_functions/teamhubCal/ABCDEFGHJKLMNPQRSTUVWXYZabcdefgh.ics';
+  const MD = { view: 'month', me: ME, ym: '2027-03', today: '2027-03-01', totals: { hours: 0 }, items: [] };
+  await set({ ...MD }, 'ready', '');
+  ok('no link, no button', !(await q('[data-cal]')));
+  await set({ ...MD, calUrl: URL1 }, 'ready', '');
+  ok('My month shows Add to calendar', await q('[data-cal]'));
+  await click('[data-cal]');
+  const hrefs = await page.evaluate(`[...${R}.querySelectorAll('#calDlg a.calopt')].map(a => a.getAttribute('href'))`);
+  ok('three calendars, nothing else', hrefs.length === 3 &&
+    !(await q('#calDlg [data-copycal]')), hrefs);
+  ok('Apple subscribes with webcal://', hrefs[0] === URL1.replace('https:', 'webcal:'), hrefs[0]);
+  ok('Google gets the webcal link as cid',
+    hrefs[1] === 'https://calendar.google.com/calendar/render?cid=' + encodeURIComponent(URL1.replace('https:', 'webcal:')), hrefs[1]);
+  ok('Outlook gets the https link and a name',
+    hrefs[2].startsWith('https://outlook.live.com/calendar/0/addfromweb?url=' + encodeURIComponent(URL1)) && /name=BLG%20TeamHub/.test(hrefs[2]), hrefs[2]);
+  const cev = [];
+  await page.exposeFunction('noteCal', () => cev.push(1));
+  await page.evaluate(`document.querySelector('blg-teamhub-month').addEventListener('teamhub:calstop', () => window.noteCal())`);
+  await click('[data-calstop]');
+  ok('Stop asks first', await q('[data-calstopyes]') && cev.length === 0);
+  await click('[data-calback]');
+  ok('...Back returns to the three calendars', await q('#calDlg a.calopt'));
+  await click('[data-calstop]'); await click('[data-calstopyes]');
+  await page.waitForTimeout(20);
+  ok('...Stop sync sends it once and closes', cev.length === 1 && !(await q('#calDlg')), cev);
+  await click('[data-cal]');
+  await set({ view: 'open', me: ME, today: '2027-03-01', mine: [], covered: [] }, 'ready', '');
+  ok('leaving My month closes the pop-up', !(await q('#calDlg')));
+}
+
 console.log('\n— errors —');
 ok('no page errors at all', errs.length === 0, errs.slice(0, 4));
 

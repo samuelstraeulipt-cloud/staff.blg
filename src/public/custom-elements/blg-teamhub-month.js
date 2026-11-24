@@ -115,6 +115,32 @@
     return p.length < 2 ? s : p[0] + ' ' + p[p.length - 1][0] + '.';
   }
 
+  /* The subscribe links for one feed URL. webcal:// tells a phone or Mac
+     "subscribe to this", not "download this". */
+  /* A phone or tablet, where Google's add-by-URL page does not exist. */
+  function isPhone() {
+    return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || '') ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  }
+  function calLinks(url) {
+    var web = String(url).replace(/^https?:/, 'webcal:');
+    return {
+      apple: web,
+      google: 'https://calendar.google.com/calendar/render?cid=' + encodeURIComponent(web),
+      outlook: 'https://outlook.live.com/calendar/0/addfromweb?url=' + encodeURIComponent(url) +
+        '&name=' + encodeURIComponent('BLG TeamHub')
+    };
+  }
+  var CAL_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" width="15" height="15" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" style="margin-right:6px;vertical-align:-2px">' +
+    '<rect x="3" y="4.5" width="18" height="16" rx="3"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4M12 13v5M9.5 15.5h5"/></svg>';
+  var CAL_APPLE = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="2" y="3" width="20" height="19" rx="4" fill="#fff" stroke="#E2E2E8"/>' +
+    '<rect x="2" y="3" width="20" height="6" rx="3" fill="#FF3B30"/><text x="12" y="19" text-anchor="middle" font-size="9" font-family="Arial" font-weight="700" fill="#1C1C1E">24</text></svg>';
+  var CAL_GOOGLE = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="4" fill="#fff" stroke="#E2E2E8"/>' +
+    '<path d="M2 8h20" stroke="#4285F4" stroke-width="3"/><text x="12" y="19" text-anchor="middle" font-size="9" font-family="Arial" font-weight="700" fill="#4285F4">31</text></svg>';
+  var CAL_OUTLOOK = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="4" fill="#0F6CBD"/>' +
+    '<circle cx="10" cy="12" r="4.2" fill="none" stroke="#fff" stroke-width="2.2"/><path d="M15 8h4v8h-4" fill="none" stroke="#fff" stroke-width="1.6"/></svg>';
+
   var has = function (arr, v) { return (arr || []).indexOf(v) > -1; };
   var isAdmin = function (me) { return has(me.roles, 'admin'); };
   var isCoach = function (me) { return has(me.roles, 'coach'); };
@@ -417,6 +443,19 @@
     '  border-top-color:var(--black);animation:waSpin .8s linear infinite}',
     '@keyframes waSpin{to{transform:rotate(360deg)}}',
     '.wa-list{margin:0 0 4px;padding:0;list-style:none;font-size:13.5px}',
+    '.calopts{display:flex;flex-direction:column;gap:8px;margin:0 0 14px}',
+    '.calopt{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--line);',
+    '  border-radius:14px;text-decoration:none;color:var(--text);min-height:52px;box-sizing:border-box;',
+    '  width:100%;background:#fff;font:inherit;text-align:left;cursor:pointer}',
+    '.calopt:hover{border-color:var(--black);background:#FAFAFB}',
+    '.calopt-i{display:flex;flex:0 0 auto}',
+    '.calopt-t{display:flex;flex-direction:column;flex:1;line-height:1.3}',
+    '.calopt-t strong{font-family:var(--f-head);font-weight:600;font-size:14.5px}',
+    '.calopt-go{color:var(--muted);font-size:22px;line-height:1}',
+    '.calbtn{white-space:nowrap}',
+    '.calstop{display:block;margin:14px auto 0;padding:8px 12px;border:0;background:none;',
+    '  color:var(--muted);font:500 12.5px var(--f-body);text-decoration:underline;cursor:pointer}',
+    '.calstop:hover{color:var(--danger)}',
     '.wa-list li{padding:3px 0}',
 
     /* ----------------------------------------------------------- tables */
@@ -1257,7 +1296,7 @@
       var el = ev.target && ev.target.closest
         ? ev.target.closest('[data-ym],[data-thismonth],[data-week],[data-thisweek],' +
             '[data-pick],[data-clear],[data-record],[data-undo],[data-msg],' +
-            '[data-closeshare],[data-closetell],[data-copy],[data-copytable],[data-go],[data-req],' +
+            '[data-closeshare],[data-closetell],[data-cal],[data-closecal],[data-calgoogle],[data-calback],[data-calstop],[data-calstopyes],[data-copy],[data-copytable],[data-go],[data-req],' +
             '[data-withdraw],[data-assign],[data-decline],[data-unassign],' +
             '[data-askcancel],[data-nocancel],[data-cancel],[data-authmode],[data-signout],[data-sndone],' +
             '[data-plancheck],[data-planapply],[data-planclear],[data-sncheck],' +
@@ -1371,6 +1410,12 @@
       }
       if (el.dataset.closeshare) { this._closeShare(); return; }
       if (el.dataset.closetell) { this._closeTell(); return; }
+      if (el.dataset.cal) { this._cal = true; this._calAnim = true; this._syncCal(); return; }
+      if (el.dataset.closecal) { this._closeCal(); return; }
+      if (el.dataset.calgoogle) { this._calStep = 'google'; this._syncCal(); return; }
+      if (el.dataset.calback) { this._calStep = null; this._syncCal(); return; }
+      if (el.dataset.calstop) { this._calStep = 'stop'; this._syncCal(); return; }
+      if (el.dataset.calstopyes) { this._closeCal(); this._emit('teamhub:calstop', {}); return; }
 
       /* Cancelling is two clicks: arm, then confirm. Arming another row disarms
          the first, so only one button is ever live at a time. */
@@ -1623,6 +1668,7 @@
       this._markSending();
       this._syncShare();
       this._syncTell();
+      this._syncCal();
     }
 
     /* ------------------------------------------- telling the assigned person */
@@ -1671,6 +1717,107 @@
         });
       }
       if (ok) { t.state = 'ready'; t.anim = true; } else this._tell = null;
+    }
+
+    /* "Add to calendar": the person's own TeamHub feed, subscribed once in the
+       calendar app they use. The feed is live — a handover drops out of it,
+       a cover appears — so nothing here imports a copy. */
+    _closeCal() {
+      this._cal = false;
+      this._calStep = null;
+      var dlg = this.shadowRoot && this.shadowRoot.getElementById('calDlg');
+      if (dlg) {
+        try { if (dlg.open) dlg.close(); } catch (e) { /* already closed */ }
+        if (dlg.parentNode) dlg.parentNode.removeChild(dlg);
+      }
+    }
+
+    _syncCal() {
+      if (!this.shadowRoot) return;
+      var url = this._data && this._data.calUrl;
+      var dlg = this.shadowRoot.getElementById('calDlg');
+      if (!this._cal || !url) {
+        if (!url) this._cal = false;
+        if (dlg && dlg.parentNode) {
+          try { if (dlg.open) dlg.close(); } catch (e) { /* already closed */ }
+          dlg.parentNode.removeChild(dlg);
+        }
+        return;
+      }
+      var self = this;
+      if (!dlg) {
+        dlg = document.createElement('dialog');
+        dlg.id = 'calDlg';
+        dlg.className = 'wa-dlg';
+        dlg.setAttribute('aria-labelledby', 'calTitle');
+        dlg.addEventListener('cancel', function (e) { e.preventDefault(); self._closeCal(); });
+        dlg.addEventListener('click', function (e) { if (e.target === dlg) self._closeCal(); });
+        this.shadowRoot.appendChild(dlg);
+      }
+      var L = calLinks(url);
+      var me = this._data.me || {};
+      var what = isFD(me) && isCoach(me) ? 'classes and front desk shifts'
+        : isFD(me) ? 'front desk shifts' : 'classes';
+      var inner = function (icon, name) {
+        return '<span class="calopt-i">' + icon + '</span>' +
+          '<span class="calopt-t"><strong>' + esc(name) + '</strong></span>' +
+          '<span class="calopt-go">›</span>';
+      };
+      var opt = function (href, icon, name, attrs) {
+        return '<a class="calopt" href="' + esc(href) + '"' + (attrs || '') + '>' + inner(icon, name) + '</a>';
+      };
+      if (this._calAnim) dlg.classList.add('wa-in');
+      /* Google lets nobody subscribe from its phone app or phone site: it has
+         to be done once in a computer's browser, and then shows on the phone
+         as well. So on a phone the Google choice explains that and offers to
+         mail the link to yourself instead of opening a page that can't do it. */
+      if (this._calStep === 'google') {
+        dlg.innerHTML = '<div class="wa-box" role="document">' +
+          '<h2 class="wa-title" id="calTitle">Google Calendar: once on a computer</h2>' +
+          '<p class="wa-sub">Google only lets you add a calendar in a computer’s browser, not in ' +
+            'its phone app. Do it once on a computer and it shows up in the Google Calendar app ' +
+            'on your phone too.</p>' +
+          '<p class="wa-sub">Send yourself the link, open the mail on your computer and click it — ' +
+            'or open TeamHub on your computer and choose Google Calendar there.</p>' +
+          '<div class="wa-actions">' +
+            '<a class="btn btn-primary" href="mailto:?subject=' + encodeURIComponent('BLG TeamHub calendar') +
+              '&body=' + encodeURIComponent('Open this on your computer to add your TeamHub calendar to Google Calendar:\n\n' + L.google) +
+              '">Email me the link</a>' +
+            '<button class="btn btn-quiet" data-calback="1">Back</button>' +
+          '</div></div>';
+      } else if (this._calStep === 'stop') {
+        dlg.innerHTML = '<div class="wa-box" role="document">' +
+          '<h2 class="wa-title" id="calTitle">Stop calendar sync?</h2>' +
+          '<p class="wa-sub">Your BLG TeamHub calendar empties out and stops updating, in every ' +
+            'calendar app you added it to. You can then delete the empty calendar there.</p>' +
+          '<p class="wa-sub">Want it back later? Add to calendar again — it makes a new link.</p>' +
+          '<div class="wa-actions">' +
+            '<button class="btn btn-danger" data-calstopyes="1">Stop sync</button>' +
+            '<button class="btn btn-quiet" data-calback="1">Back</button>' +
+          '</div></div>';
+      } else dlg.innerHTML = '<div class="wa-box" role="document">' +
+        '<h2 class="wa-title" id="calTitle">Add TeamHub to your calendar</h2>' +
+        '<p class="wa-sub">Your ' + what + ' show up as a separate <strong>BLG TeamHub</strong> ' +
+          'calendar and keep themselves up to date.</p>' +
+        '<div class="calopts">' +
+          opt(L.apple, CAL_APPLE, 'Apple Calendar') +
+          (isPhone()
+            ? '<button type="button" class="calopt" data-calgoogle="1">' + inner(CAL_GOOGLE, 'Google Calendar') + '</button>'
+            : opt(L.google, CAL_GOOGLE, 'Google Calendar', ' target="_blank" rel="noopener"')) +
+          opt(L.outlook, CAL_OUTLOOK, 'Outlook', ' target="_blank" rel="noopener"') +
+        '</div>' +
+        '<div class="wa-actions">' +
+          '<button class="btn btn-quiet" data-closecal="1">Close</button>' +
+        '</div>' +
+        '<button type="button" class="calstop" data-calstop="1">Stop calendar sync</button>' +
+        '</div>';
+      if (!dlg.open) {
+        try { dlg.showModal(); } catch (e) { dlg.setAttribute('open', ''); }
+      }
+      if (this._calAnim) {
+        this._calAnim = false;
+        setTimeout(function () { dlg.classList.remove('wa-in'); }, 300);
+      }
     }
 
     _closeTell() {
@@ -2033,7 +2180,10 @@
         '<p class="page-sub">Your ' +
           (isFD(me) && !isCoach(me) ? 'shifts' : 'classes') +
           ' this month — tick anything you can’t make and it goes out for cover</p>' +
-        '</div></div>');
+        '</div>' + (d.calUrl
+          ? '<div class="actions"><button type="button" class="btn btn-quiet btn-sm calbtn" data-cal="1">' +
+              CAL_ICON + 'Add to calendar</button></div>'
+          : '') + '</div>');
       if (me.test) {
         out.push('<div class="card" data-testbanner="1" style="margin-bottom:16px;padding:12px 16px;' +
           'background:var(--warn-tint);border-color:var(--warn)"><strong>Test account.</strong> ' +

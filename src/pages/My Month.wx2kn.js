@@ -27,7 +27,7 @@ import {
   getAdminQueue, assignCover, declineRequest, unassignCover, cancelHandover,
   markSportsNowDone,
   getFrontDesk, setShiftStaff, setShiftClosed, importShiftPlan, getSportsNowWeek, checkSportsNowNow,
-  getWeek, getTeamAbsences
+  getWeek, getTeamAbsences, stopCalendar
 } from 'backend/teamhub.web';
 
 const ELEMENT_ID = '#teamhub';
@@ -184,6 +184,11 @@ $w.onReady(async function () {
   el.on('teamhub:request',  (event) => act(
     () => requestCover(event.detail.sessionId, event.detail.kind),
     'Requested. An admin will confirm it — you will see it on your month.'));
+  /* "Stop calendar sync": the old calendar link answers empty from now on. */
+  el.on('teamhub:calstop', () => act(() => stopCalendar(),
+    'Calendar sync stopped. Your BLG TeamHub calendar empties out by itself — ' +
+    'you can then delete it from your calendar app.'));
+
   el.on('teamhub:withdraw', (event) => act(
     () => withdrawRequest(event.detail.sessionId), 'Request withdrawn.'));
 
